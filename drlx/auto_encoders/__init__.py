@@ -77,3 +77,26 @@ class PipelineAutoEncoder(AutoEncoder):
     def decode(self, latent):
         with torch.no_grad():
             return self.model.decode(latent)
+
+class PretrainedAutoEncoder(AutoEncoder):
+    """
+    Load a pretrained autoencoder directly from a checkpoint in diffusers.
+    """
+    def __init__(self, folder_or_path : str):
+        super().__init__()
+
+        self.model = AutoencoderKL.from_pretrained(folder_or_path)
+        self.prep = self.model.image_processor
+        self.latent_shape = None
+        self.determine_latent_shape()
+    
+    def preprocess(self, images):
+        return self.prep.preprocess(images)
+
+    def encode(self, pixel_values):
+        with torch.no_grad():
+            return self.model.encode(pixel_values).latent_dist.sample()
+    
+    def decode(self, latent):
+        with torch.no_grad():
+            return self.model.decode(latent)
