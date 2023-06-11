@@ -33,7 +33,7 @@ class TextConditionedUNet(BaseConditionalDenoiser):
             truncation = True,
             return_tensors = "pt"
         )
-        return (tok_out.input_ids, tok_out.attention_mask)
+        return tok_out.input_ids, tok_out.attention_mask
 
     def forward(
             self,
