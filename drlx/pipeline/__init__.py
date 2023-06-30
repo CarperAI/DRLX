@@ -32,7 +32,7 @@ class Pipeline(Dataset):
         """
         self.prep = fn
 
-    def create_loader(self, accelerate : bool = False, device : torch.device = None, **kwargs) -> DataLoader:
+    def create_train_loader(self, accelerate : bool = False, device : torch.device = None, **kwargs) -> DataLoader:
         if self.prep is None:
             raise ValueError("Preprocessing function must be set before creating a dataloader.")
 
