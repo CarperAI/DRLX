@@ -4,6 +4,7 @@ from torchtyping import TensorType
 import torch
 from torch import nn
 from diffusers import AutoencoderKL
+from diffusers.image_processor import VaeImageProcessor
 
 import numpy as np
 from PIL import Image
@@ -63,8 +64,8 @@ class PipelineAutoEncoder(AutoEncoder):
 
         pipe = pipeline_cls.from_pretrained(folder_or_path)
         self.model = pipe.vae
-        self.prep = pipe.image_processor
         self.latent_shape = None
+        self.prep = VaeImageProcessor(pipe.vae_scale_factor)
         self.determine_latent_shape()
     
     def preprocess(self, images):
