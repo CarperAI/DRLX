@@ -3,8 +3,10 @@ from abc import abstractmethod
 from torchtyping import TensorType
 from typing import Iterable
 
-from transfomers import AutoProcessor, AutoModel
+from transformers import AutoProcessor, AutoModel
 import torch
+from torch import nn
+from PIL import Image
 
 class RewardModel(nn.Module):
     """
