@@ -8,9 +8,9 @@ class Pipeline(Dataset):
     def __init__(self):
         super().__init__()
 
-    @abstractmethod
     def create_train_loader(self, **kwargs) -> DataLoader:
-        pass
+        # By default just create_loader
+        return self.create_loader(**kwargs)
 
     @abstractmethod
     def create_val_loader(self, **kwargs) -> DataLoader:
@@ -32,7 +32,7 @@ class Pipeline(Dataset):
         """
         self.prep = fn
 
-    def create_train_loader(self, accelerate : bool = False, device : torch.device = None, **kwargs) -> DataLoader:
+    def create_loader(self, accelerate : bool = False, device : torch.device = None, **kwargs) -> DataLoader:
         if self.prep is None:
             raise ValueError("Preprocessing function must be set before creating a dataloader.")
 
