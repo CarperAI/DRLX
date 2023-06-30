@@ -5,10 +5,12 @@ import torch
 from diffusers import UNet2DConditionModel
 
 from drlx.denoisers import BaseConditionalDenoiser
+from drlx.configs import ModelConfig, SamplerConfig
+from drlx.sampling import Sampler
 
 class TextConditionedUNet(BaseConditionalDenoiser):
-    def __init__(self, config):
-        super().__init__(config)
+    def __init__(self, config : ModelConfig, sampler_config : SamplerConfig = None, sampler : Sampler = None):
+        super().__init__(config, sampler_config, sampler)
 
         self.unet : UNet2DConditionModel = None
         self.text_encoder = None
@@ -24,6 +26,8 @@ class TextConditionedUNet(BaseConditionalDenoiser):
         self.text_encoder = pipe.text_encoder
         self.tokenizer = pipe.tokenizer
         self.scheduler = pipe.scheduler
+
+        return self
     
     def preprocess(self, text : Iterable[str]):
         tok_out = self.tokenizer(
