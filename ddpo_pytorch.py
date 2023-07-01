@@ -40,6 +40,8 @@ def parse_args():
     args.add_argument("--buffer_size", type=int, default=32)
     args.add_argument("--min_count", type=int, default=16)
     args.add_argument("--wandb_project", type=str, default="DDPO")
+    args.add_argument("--gpu", type=int, default=0)
+    return args.parse_args()
 
 
 
@@ -69,7 +71,6 @@ class MLP(nn.Module):
     def forward(self, x):
         return self.layers(x)
 
-# %%
 def load_aesthetic_model_weights(cache="."):
     weights_fname = "sac+logos+ava1-l14-linearMSE.pth"
     loadpath = os.path.join(cache, weights_fname)
@@ -87,7 +88,6 @@ def load_aesthetic_model_weights(cache="."):
     weights = torch.load(loadpath, map_location=torch.device("cpu"))
     return weights
 
-# %%
 def aesthetic_model_normalize(a, axis=-1, order=2):
     l2 = np.atleast_1d(np.linalg.norm(a, order, axis))
     l2[l2 == 0] = 1
@@ -234,6 +234,9 @@ def compute_loss(x_t, original_log_probs, advantages, clip_advantages, clip_rati
 if __name__ == '__main__':
     args = parse_args()
 
+    # set the gpu
+    torch.cuda.set_device(args.gpu)
+
     wandb.init(
     # set the wandb project where this run will be logged
     project=args.wandb_project,
@@ -303,7 +306,7 @@ if __name__ == '__main__':
 
     sample_prompts = next(iter(train_dl)) # sample a batch of prompts to use for visualization
 
-    if args.enable_gradient_checkpointing: pipe.unet.enable_gradient_checkpointing() # more performance optimization
+    if args.enable_grad_checkpointing: pipe.unet.enable_gradient_checkpointing() # more performance optimization
 
     optimizer = torch.optim.AdamW(pipe.unet.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     per_prompt_stat_tracker = PerPromptStatTracker(args.buffer_size, args.min_count)
@@ -337,7 +340,7 @@ if __name__ == '__main__':
 
         # sample some images with the consistent prompt for visualization
         sample_imgs, sample_rewards, _, _ = sample_and_calculate_rewards(sample_prompts, pipe, args.img_size, args.cfg, args.num_timesteps, decoding_fn, reward_fn, 'cuda')
-        wandb.log({"sample img batch": [wandb.Image(Image.fromarray(img), caption=prompt + f', {reward}') for img, prompt, reward in zip(sample_imgs, sample_prompts, sample_rewards)]})
+        wandb.log({"sample img batch": [wandb.Image(Image.fromarray(img), caption=prompt + f', {reward.item()}') for img, prompt, reward in zip(sample_imgs, sample_prompts, sample_rewards)]})
 
         # inner loop
         for inner_epoch in progress_bar(range(args.num_inner_epochs)):
