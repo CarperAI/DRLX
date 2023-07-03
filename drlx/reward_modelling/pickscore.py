@@ -30,19 +30,15 @@ class PickScoreModel(RewardModel):
         
         return image_inputs['pixel_values'], text_inputs['input_ids'], text_inputs['attention_mask']
     
+    @torch.no_grad() # This repo does not train the model, so in general, no_grad will be used here
     def forward(self, pixel_values, input_ids, attention_mask):
-        # This repo does not train the model, so in general, no_grad will be used here
-        with torch.no_grad():
-            def normalize(t):
-                return t / t.norm(dim=-1, keepdim=True)
-            
-            image_embs = self.model.get_image_features(pixel_values=pixel_values)
-            image_embs = normalize(t)
+        image_embs = self.model.get_image_features(pixel_values=pixel_values)
+        image_embs /= image_embs.norm(dim=-1, keepdim=True)
 
-            text_embs = self.model.get_text_features(input_ids=input_ids, attention_mask=attention_mask)
-            text_embs = normalize(t)
+        text_embs = self.model.get_text_features(input_ids=input_ids, attention_mask=attention_mask)
+        text_embs /= text_embs.norm(dim=-1, keepdim=True)
 
-            scores = torch.einsum('bd,bd->b', image_embs, text_embs)
-            scores = self.model.logit_scale.exp() * scores
+        scores = torch.einsum('bd,bd->b', image_embs, text_embs)
+        scores = self.model.logit_scale.exp() * scores
 
-            return scores
+        return scores
