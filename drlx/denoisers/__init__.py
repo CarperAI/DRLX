@@ -1,4 +1,4 @@
-from typing import Iterable, Dict, Any, Optional
+from typing import Iterable, Dict, Any, Optional, Tuple
 from torchtyping import TensorType
 
 from abc import abstractmethod
@@ -21,6 +21,10 @@ class BaseConditionalDenoiser(nn.Module):
         self.sampler = Sampler(sampler_config) if sampler_config is not None else sampler
     
     @abstractmethod
+    def get_input_shape(self) -> Tuple:
+        pass
+
+    @abstractmethod
     def preprocess(self, *inputs):
         """
         Called on the conditioning input
@@ -28,5 +32,24 @@ class BaseConditionalDenoiser(nn.Module):
         pass
 
     @abstractmethod
+    def postprocess(self, output):
+        """
+        Called on the output from the model after sampling
+        """
+        pass
+
+    @abstractmethod
     def forward(self, *inputs):
         pass
+
+    # === LATENT DIFFUSION ===
+
+    @abstractmethod
+    def encode(self, pixel_values : TensorType["batch", "channels", "height", "width"]) -> torch.Tensor:
+        pass
+
+    @abstractmethod
+    def decode(self, latent : torch.Tensor) -> TensorType["batch", "channels", "height", "width"]:
+        pass
+
+    
