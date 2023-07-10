@@ -1,5 +1,7 @@
 from abc import abstractmethod
-from typing import Callable
+from typing import Callable, Iterable, Tuple
+
+from PIL import Image
 
 import torch
 from torch.utils.data import DataLoader, Dataset
@@ -7,6 +9,8 @@ from torch.utils.data import DataLoader, Dataset
 class Pipeline(Dataset):
     def __init__(self):
         super().__init__()
+
+        self.prep : Callable = None
 
     def create_train_loader(self, **kwargs) -> DataLoader:
         # By default just create_loader
@@ -17,12 +21,12 @@ class Pipeline(Dataset):
         pass
 
     @classmethod
-    def make_default_collate(self):
-        def collate(self, batch : Iterable[Tuple[Image.Image, str]]):
+    def make_default_collate(self, prep : Callable):
+        def collate(batch : Iterable[Tuple[Image.Image, str]]):
             img_batch = [d[0] for d in batch]
             txt_batch = [d[1] for d in batch]
 
-            return self.prep(img_batch, txt_batch)
+            return prep(img_batch, txt_batch)
 
         return collate
 
@@ -39,4 +43,4 @@ class Pipeline(Dataset):
         if 'shuffle' in kwargs:
             del kwargs['shuffle']
 
-        return DataLoader(self, collate_fn = self.make_default_collate(), **kwargs)
+        return DataLoader(self, collate_fn = self.make_default_collate(self.prep), **kwargs)
