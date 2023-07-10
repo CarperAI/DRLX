@@ -15,6 +15,12 @@ class ConfigClass:
 @dataclass
 class ModelConfig(ConfigClass):
     ema_alpha : float = None # Doesn't use EMA if this is None
+    vae_device : str = "cuda:0" # Device for VAE if LDM
+    img_size : int = 512
+
+@dataclass
+class RewardModelConfig(ConfigClass):
+    pass
 
 @dataclass
 class TrainConfig(ConfigClass):
@@ -43,6 +49,14 @@ class TrainConfig(ConfigClass):
     run_name : str = None
     wandb_entity : str = None
     wandb_project : str = None
+
+@dataclass
+class MethodConfig(ConfigClass):
+    """
+    Specific configs for different RL training methods.
+    Implemented in same scripts as trainers
+    """
+    pass
 
 @dataclass
 class SamplerConfig(ConfigClass):
