@@ -10,7 +10,7 @@ class Pipeline(Dataset):
     def __init__(self):
         super().__init__()
 
-        self.prep : Callable = None
+        self.prep : Callable = lambda x: x # identity by default
 
     def create_train_loader(self, **kwargs) -> DataLoader:
         # By default just create_loader
