@@ -1,9 +1,9 @@
 from torchtyping import TensorType
-from typing import Iterable, Union
+from typing import Iterable, Union, Callable
 
 import torch
 import numpy as np
-from diffusers import UNet2DConditionModel
+from diffusers import UNet2DConditionModel, DDIMScheduler
 
 from drlx.denoisers import BaseConditionalDenoiser
 from drlx.configs import ModelConfig, SamplerConfig
@@ -16,6 +16,7 @@ class LDMUNet(BaseConditionalDenoiser):
         self.unet : UNet2DConditionModel = None
         self.text_encoder = None
         self.vae = None
+        self.encode_prompt : Callable = None
 
         self.tokenizer = None
         self.scheduler = None
@@ -25,7 +26,7 @@ class LDMUNet(BaseConditionalDenoiser):
     def get_input_shape(self):
         assert self.unet and self.vae, "Cannot get input shape if model not initialized"
 
-        in_channels = self.unet.in_channels
+        in_channels = self.unet.config.in_channels
         sample_size = self.config.img_size // self.scale_factor
 
         return (in_channels, sample_size, sample_size)
@@ -41,12 +42,23 @@ class LDMUNet(BaseConditionalDenoiser):
         self.vae = pipe.vae
         self.scale_factor = pipe.vae_scale_factor
         self.vae = self.vae.to(self.config.vae_device)
+        self.encode_prompt = pipe._encode_prompt
 
         self.text_encoder.requires_grad_(False)
         self.vae.requires_grad_(False)
 
         self.tokenizer = pipe.tokenizer
-        self.scheduler = pipe.scheduler
+        self.scheduler = DDIMScheduler(
+            num_train_timesteps=pipe.scheduler.config.num_train_timesteps,
+            beta_start=pipe.scheduler.config.beta_start,
+            beta_end=pipe.scheduler.config.beta_end,
+            beta_schedule=pipe.scheduler.config.beta_schedule,
+            trained_betas=pipe.scheduler.config.trained_betas,
+            clip_sample=pipe.scheduler.config.clip_sample,
+            set_alpha_to_one=pipe.scheduler.config.set_alpha_to_one,
+            steps_offset=pipe.scheduler.config.steps_offset,
+            prediction_type=pipe.scheduler.config.prediction_type
+        )
 
         return self
     
@@ -71,16 +83,18 @@ class LDMUNet(BaseConditionalDenoiser):
     def forward(
             self,
             pixel_values : TensorType["batch", "channels", "height", "width"],
-            input_ids : TensorType["batch", "seq_len"],
-            attention_mask : TensorType["batch", "seq_len"],
-            time_step : Union[TensorType["batch"], int] # Note diffusers tyically does 999->0 as steps
+            time_step : Union[TensorType["batch"], int], # Note diffusers tyically does 999->0 as steps
+            input_ids : TensorType["batch", "seq_len"] = None,
+            attention_mask : TensorType["batch", "seq_len"] = None,
+            text_embeds : TensorType["batch", "d"] = None
         ):
         """
         For text conditioned UNET, inputs are assumed to be:
         pixel_values, input_ids, attention_mask, time_step
         """
         with torch.no_grad():
-            text_embeds = self.text_encoder(input_ids, attention_mask)[0]
+            if text_embeds is None:
+                text_embeds = self.text_encoder(input_ids, attention_mask)[0]
 
         return self.unet(
             pixel_values,
