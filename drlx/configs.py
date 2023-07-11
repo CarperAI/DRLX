@@ -61,8 +61,12 @@ class MethodConfig(ConfigClass):
 @dataclass
 class SamplerConfig(ConfigClass):
     mode : str = "v" # x, v, or eps
-    guidance_scale : float = None # if guidance is being used
+    guidance_scale : float = 5.0 # if guidance is being used
     sigma_data : float = 0.5 # Estimated sd for data
+    num_inference_steps : int = 50
+    eta : float = 1
+    device : str = "cuda"
+    postprocess : bool = False # If true, post processes latents to images (uint8 np arrays)
 
 
 def load_yaml(yml_fp : str) -> Dict[str, ConfigClass]:
