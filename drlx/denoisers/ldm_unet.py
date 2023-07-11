@@ -86,7 +86,7 @@ class LDMUNet(BaseConditionalDenoiser):
             pixel_values,
             time_step,
             encoder_hidden_states = text_embeds
-        )
+        ).sample
     
 
         

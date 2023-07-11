@@ -25,7 +25,7 @@ class ToyPipeline(PromptPipeline):
 
 
 model = LDMUNet(ModelConfig(), sampler_config = SamplerConfig())
-model.from_pretrained_pipeline(StableDiffusionPipeline, "stabilityai/stable-diffusion-2-1")
+model.from_pretrained_pipeline(StableDiffusionPipeline, "CompVis/stable-diffusion-v1-4")
 model = model.to('cuda')
 
 pipe = ToyPipeline()
