@@ -48,18 +48,7 @@ class LDMUNet(BaseConditionalDenoiser):
         self.vae.requires_grad_(False)
 
         self.tokenizer = pipe.tokenizer
-        self.scheduler = DDIMScheduler(
-            num_train_timesteps=pipe.scheduler.config.num_train_timesteps,
-            beta_start=pipe.scheduler.config.beta_start,
-            beta_end=pipe.scheduler.config.beta_end,
-            beta_schedule=pipe.scheduler.config.beta_schedule,
-            trained_betas=pipe.scheduler.config.trained_betas,
-            clip_sample=pipe.scheduler.config.clip_sample,
-            set_alpha_to_one=pipe.scheduler.config.set_alpha_to_one,
-            steps_offset=pipe.scheduler.config.steps_offset,
-            prediction_type=pipe.scheduler.config.prediction_type
-        )
-
+        self.scheduler = DDIMScheduler.from_config(pipe.scheduler.config)
         return self
     
     def preprocess(self, text : Iterable[str]):
@@ -72,7 +61,7 @@ class LDMUNet(BaseConditionalDenoiser):
         )
         return tok_out.input_ids, tok_out.attention_mask
 
-    @torch.no_grad()
+    @torch.no_grad() # TODO: device placement should be using accelerate
     def postprocess(self, output : TensorType["batch", "channels", "height", "width"]):
         images = self.vae.decode(1 / 0.18215 * output.cuda()).sample
         images = (images / 2 + 0.5).clamp(0, 1)
