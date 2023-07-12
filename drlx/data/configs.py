@@ -254,7 +254,6 @@ class SamplerConfig(ConfigClass): # TODO: is this needed?
     sigma_data : float = 0.5 # Estimated sd for data
     num_inference_steps : int = 50
     eta : float = 1
-    device : str = "cuda"
     postprocess : bool = False # If true, post processes latents to images (uint8 np arrays)
 
 
