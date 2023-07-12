@@ -51,19 +51,37 @@ class LDMUNet(BaseConditionalDenoiser):
         self.scheduler = DDIMScheduler.from_config(pipe.scheduler.config)
         return self
     
-    def preprocess(self, text : Iterable[str]):
-        tok_out = self.tokenizer(
-            text,
-            padding = 'max_length',
-            max_length = self.tokenizer.model_max_length,
-            truncation = True,
-            return_tensors = "pt"
-        )
-        return tok_out.input_ids, tok_out.attention_mask
+    def preprocess(self, text : Iterable[str], mode = "text", **embed_kwargs):
+        """
+        Preprocess text input, either into tokens or into embeddings.
+        
+        :param mode: Either "tokens" or "embeds"
+        :type mode: str
+
+        :param text: Text to preprocess
+        :type text: Iterable[str]
+
+        :return: Either a tuple of tensors for input_ids and attention_mask or a tensor of embeddings
+        :rtype: Union[Tuple[Tensor, Tensor], Tensor]
+        """
+
+        if mode == "tokens":
+            tok_out = self.tokenizer(
+                text,
+                padding = 'max_length',
+                max_length = self.tokenizer.model_max_length,
+                truncation = True,
+                return_tensors = "pt"
+            )
+            return tok_out.input_ids, tok_out.attention_mask
+        elif mode == "embeds":
+            return self.encode_prompt(text, **embed_kwargs)
+        else: 
+            raise ValueError("Invalid mode specified for preprocessing")
 
     @torch.no_grad() # TODO: device placement should be using accelerate
     def postprocess(self, output : TensorType["batch", "channels", "height", "width"]):
-        images = self.vae.decode(1 / 0.18215 * output.cuda()).sample
+        images = self.vae.decode(1 / 0.18215 * output).sample
         images = (images / 2 + 0.5).clamp(0, 1)
         images = images.detach().cpu().permute(0,2,3,1).numpy()
         images = (images * 255).round().astype(np.uint8)
@@ -76,7 +94,7 @@ class LDMUNet(BaseConditionalDenoiser):
             input_ids : TensorType["batch", "seq_len"] = None,
             attention_mask : TensorType["batch", "seq_len"] = None,
             text_embeds : TensorType["batch", "d"] = None
-        ):
+        ) -> TensorType["batch", "channels", "height", "width"]:
         """
         For text conditioned UNET, inputs are assumed to be:
         pixel_values, input_ids, attention_mask, time_step
