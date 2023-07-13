@@ -36,6 +36,7 @@ class PerPromptStatTracker:
             advantages[prompts == prompt] = (prompt_rewards - mean) / std
 
         return advantages
+
 class DDPOTrainer(BaseTrainer):
     def __init__(self, config: DDPOConfig, reward_fn=None, **kwargs):
         """ 
@@ -69,7 +70,6 @@ class DDPOTrainer(BaseTrainer):
         if self.config.model_path is not None:
             model.from_pretrained_pipeline(self.config.pipeline, self.config.model_path)
         return model
-
 
     def setup_reward_model(self):
         model = RewardModel(self.config.reward_model)
@@ -106,6 +106,18 @@ class DDPOTrainer(BaseTrainer):
         model_name = LDMUNet # nothing else is supported for now (TODO: add support for other models)
         return model_name
 
+    def _loss(self, x_t, log_probs_t, advantages, prompts):
+        return self.model.sampler.sample(
+            use_grad=True,
+            prompts=prompts,
+            denoiser=self.model,
+            device=self.accelerator.device,
+            advantages=advantages,
+            old_pred=x_t,
+            old_log_probs=log_probs_t,
+            show_progress=self.accelerator.is_local_main_process,
+            method_config=self.config.method
+        )
 
     def loss(self, x_t, log_probs_t, advantages, prompts):
         """
@@ -128,7 +140,7 @@ class DDPOTrainer(BaseTrainer):
 
         scheduler = self.model.scheduler
         unet = self.model.unet
-        text_embeddings = self.model._encode_prompt(prompts,self.accelerator.device, 1, do_classifier_free_guidance=self.config.sampler.guidance_scale > 1.0).detach()
+        text_embeddings = self.model.preprocess(prompts, mode = "embeds", self.accelerator.device, 1, do_classifier_free_guidance=self.config.sampler.guidance_scale > 1.0).detach()
         scheduler.set_timesteps(self.config.sampler.num_inference_steps, device=self.accelerator.device)
         loss_value = 0.
         for i, t in enumerate(tqdm(self.model.scheduler.timesteps, disable=not self.accelerator.is_local_main_process)): # note that we need to redo the sampling stuff since before with no_grad (may be possible to refactor)
