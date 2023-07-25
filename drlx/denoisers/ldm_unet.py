@@ -27,7 +27,7 @@ class LDMUNet(BaseConditionalDenoiser):
         assert self.unet and self.vae, "Cannot get input shape if model not initialized"
 
         in_channels = self.unet.config.in_channels
-        sample_size = self.config.img_size // self.scale_factor
+        sample_size = self.sampler.config.img_size // self.scale_factor
 
         return (in_channels, sample_size, sample_size)
     
@@ -41,7 +41,6 @@ class LDMUNet(BaseConditionalDenoiser):
         self.text_encoder = pipe.text_encoder
         self.vae = pipe.vae
         self.scale_factor = pipe.vae_scale_factor
-        self.vae = self.vae.to(self.config.vae_device)
         self.encode_prompt = pipe._encode_prompt
 
         self.text_encoder.requires_grad_(False)
@@ -80,7 +79,10 @@ class LDMUNet(BaseConditionalDenoiser):
             raise ValueError("Invalid mode specified for preprocessing")
 
     @torch.no_grad() # TODO: device placement should be using accelerate
-    def postprocess(self, output : TensorType["batch", "channels", "height", "width"]):
+    def postprocess(self, output : TensorType["batch", "channels", "height", "width"], vae_device = None):
+        if vae_device is not None:
+            self.vae = self.vae.to(vae_device)
+            output = output.to(vae_device)
         images = self.vae.decode(1 / 0.18215 * output).sample
         images = (images / 2 + 0.5).clamp(0, 1)
         images = images.detach().cpu().permute(0,2,3,1).numpy()

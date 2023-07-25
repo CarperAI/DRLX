@@ -1,20 +1,57 @@
-from typing import Optional, Callable, Dict, Any
+from typing import Optional, Callable, Dict, Any, Iterable
+from torchtyping import TensorType
 
 from abc import abstractmethod
 import os
 
-from drlx.configs import TrainConfig
-from drlx.auto_encoders import AutoEncoder
+from drlx.configs import DRLXConfig
 from drlx.reward_modelling import RewardModel   
-from drlx.denoisers import BaseConditionalDenoiser
+from drlx.denoisers.ldm_unet import LDMUNet
 from drlx.pipeline import Pipeline
+from drlx.utils import get_optimizer_class, get_scheduler_class, get_diffusion_pipeline_class
 
+from PIL import Image
 
 class BaseTrainer:
-    def __init__(self, config : TrainConfig):
+    def __init__(self, config : DRLXConfig):
         self.config = config
 
-    def train(self, pipeline : Pipeline, model : BaseConditionalDenoiser, ae_model : Optional[AutoEncoder] = None, reward_model : Optional[RewardModel] = None):
+        # Assume these are defined in base classes
+        self.optimizer = None
+        self.scheduler = None 
+        self.model = None
+    
+    def setup_optimizer(self):
+        """
+        Returns an optimizer derived from an instance's config
+        """
+        optimizer_class = get_optimizer_class(self.config.optimizer.name)
+        optimizer = optimizer_class(
+            self.model.parameters(),
+            **self.config.optimizer.kwargs,
+        )
+        return optimizer
+
+    def setup_scheduler(self):
+        """
+        Returns a learning rate scheduler derived from an instance's config
+        """
+        scheduler_class = get_scheduler_class(self.config.scheduler.name)
+        scheduler = scheduler_class(self.optimizer, **self.config.scheduler.kwargs)
+        return scheduler
+
+    def get_arch(self, config):
+        model_name = LDMUNet # nothing else is supported for now (TODO: add support for other models)
+        return model_name
+
+    @abstractmethod
+    def train(self, pipeline : Pipeline, reward_fn : Callable[[Iterable[Image.Image], Iterable[str]], TensorType["batch"]]):
+        """
+        Trains model on a given pipeline using a given reward function.
+        
+        :param pipeline: Data pipeline used for training
+        :param reward_fn: Function used to get rewards. Should take tuples of images (either as a sequence of numpy arrays, or as a list of images)
+        """
         pass
 
     def save_checkpoint(self, fp : str, components : Dict[str, Any], index : int = None):

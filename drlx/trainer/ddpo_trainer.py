@@ -1,16 +1,15 @@
 from accelerate import Accelerator
 from collections import deque
-from drlx.data.configs import DRLXConfig, DDPOConfig, ModelConfig, OptimizerConfig, SchedulerConfig, PromptPipelineConfig, RewardModelConfig
+from drlx.configs import DRLXConfig, DDPOConfig
 from drlx.trainer import BaseTrainer
-from drlx.pipeline.prompt_pipeline import PromptPipeline
-from drlx.denoisers import LDMUNet, BaseConditionalDenoiser
-from drlx.reward_modelling import RewardModel
 from drlx.sampling import DDPOSampler
-from drlx.utils import get_prompt_pipeline_class, get_optimizer_class, get_scheduler_class, get_diffusion_pipeline_class
 
 import torch
-import tqdm
+from tqdm import tqdm
 import numpy as np
+import wandb
+
+from diffusers import StableDiffusionPipeline
 
 class PerPromptStatTracker:
     def __init__(self, buffer_size, min_count):
@@ -38,7 +37,7 @@ class PerPromptStatTracker:
         return advantages
 
 class DDPOTrainer(BaseTrainer):
-    def __init__(self, config: DDPOConfig, reward_fn=None, **kwargs):
+    def __init__(self, config : DRLXConfig):
         """ 
         DDPO Accelerate Trainer initialization
         
@@ -47,64 +46,25 @@ class DDPOTrainer(BaseTrainer):
 
         """
         
-        super().__init__(**kwargs)
+        super().__init__(config)
+
+        assert isinstance(self.config.method, DDPOConfig), "ERROR: Method config must be DDPO config"
+
         self.accelerator = Accelerator() # TODO: Add accelerator args
 
-
         self.model = self.setup_model()
-        self.reward_fn = reward_fn
         self.optimizer = self.setup_optimizer()
         self.scheduler = self.setup_scheduler()
-        self.prompt_pipeline = self.setup_pipeline()
 
-        self.dataloader = self.prompt_pipeline.create_loader(self.config.train.batch_size)
-
-        self.model, self.reward_model, self.optimizer, self.scheduler, self.dataloader = self.accelerator.prepare(
-            self.model, self.reward_model, self.optimizer, self.scheduler, self.dataloader
+        self.model, self.optimizer, self.scheduler = self.accelerator.prepare(
+            self.model, self.optimizer, self.scheduler
         )
 
-
-    
     def setup_model(self):
         model = self.get_arch(self.config)(self.config.model, sampler = DDPOSampler())
-        if self.config.model_path is not None:
-            model.from_pretrained_pipeline(self.config.pipeline, self.config.model_path)
+        if self.config.model.model_path is not None:
+            model.from_pretrained_pipeline(StableDiffusionPipeline, self.config.model.model_path)
         return model
-
-    def setup_reward_model(self):
-        model = RewardModel(self.config.reward_model)
-        return model
-    
-    def setup_optimizer(self):
-        """
-        Returns an optimizer derived from an instance's config
-        """
-        optimizer_class = get_optimizer_class(self.config.optimizer.name)
-        optimizer = optimizer_class(
-            self.model.parameters(),
-            **self.config.optimizer.kwargs,
-        )
-        return optimizer
-
-    def setup_scheduler(self):
-        """
-        Returns a learning rate scheduler derived from an instance's config
-        """
-        scheduler_class = get_scheduler_class(self.config.scheduler.name)
-        scheduler = scheduler_class(self.opt, **self.config.scheduler.kwargs)
-        return scheduler
-
-    def setup_pipeline(self):
-        """
-        Returns a prompt pipeline derived from an instance's config
-        """
-        pipeline = get_prompt_pipeline_class(self.config.pipeline.name)
-        return pipeline
-
-
-    def get_arch(self, config):
-        model_name = LDMUNet # nothing else is supported for now (TODO: add support for other models)
-        return model_name
 
     def _loss(self, x_t, log_probs_t, advantages, prompts):
         return self.model.sampler.sample(
@@ -135,12 +95,11 @@ class DDPOTrainer(BaseTrainer):
         x_t = x_t.to(self.accelerator.device)
         log_probs_t = log_probs_t.to(self.accelerator.device)
         advantages = advantages.to(self.accelerator.device)
-        prompts = prompts.to(self.accelerator.device)
-
+        prompts = prompts.to(self.accelerator.device) # TODO: This is unnesecary? remove if it is
 
         scheduler = self.model.scheduler
         unet = self.model.unet
-        text_embeddings = self.model.preprocess(prompts, mode = "embeds", self.accelerator.device, 1, do_classifier_free_guidance=self.config.sampler.guidance_scale > 1.0).detach()
+        text_embeddings = self.model.preprocess(prompts, mode = "embeds", device = self.accelerator.device, num_images_per_prompt= 1, do_classifier_free_guidance=self.config.sampler.guidance_scale > 1.0).detach()
         scheduler.set_timesteps(self.config.sampler.num_inference_steps, device=self.accelerator.device)
         loss_value = 0.
         for i, t in enumerate(tqdm(self.model.scheduler.timesteps, disable=not self.accelerator.is_local_main_process)): # note that we need to redo the sampling stuff since before with no_grad (may be possible to refactor)
@@ -175,37 +134,49 @@ class DDPOTrainer(BaseTrainer):
 
         return loss_value
 
-
-    def sample_and_calculate_rewards(self, prompts):
+    def sample_and_calculate_rewards(self, prompts, reward_fn):
         """
         Samples a batch of images and calculates the rewards for each image
 
         Args:
             prompts (list[str]): The prompts to sample with
         """
-        preds, all_preds, log_probs = self.model.sampler.sample(prompts, self.model, device = self.accelerator.device)
+        preds, all_preds, log_probs = self.model.sampler.sample(
+            prompts = prompts,
+            denoiser = self.model,
+            device = self.accelerator.device
+        )
         imgs = self.model.postprocess(preds)
-        rewards = self.reward_model(imgs)
+        rewards = reward_fn(imgs, prompts).to(self.accelerator.device)
         return imgs, rewards, all_preds, log_probs
     
-    def train(self, reward_fn, prompt_pipeline):
+    def train(self, prompt_pipeline, reward_fn):
         """
         Trains the model based on config parameters
         """
 
+        # === SETUP ===
+        dataloader = self.accelerator.prepare(
+            prompt_pipeline.create_train_loader(batch_size = self.config.train.batch_size)
+        )
+
         assert isinstance(self.model.sampler, DDPOSampler), "Error: Model Sampler for DDPO training must be DDPO sampler"
 
-        if self.config.per_prompt_stat_tracking:
-            per_prompt_stat_tracker = PerPromptStatTracker(self.config.per_prompt_stat_tracking.buffer_size, self.config.per_prompt_stat_tracking.min_count)
-        
+        per_prompt_stat_tracker = PerPromptStatTracker(self.config.method.buffer_size, self.config.method.min_count)
+
+        if isinstance(reward_fn, torch.nn.Module):
+            reward_fn = self.accelerator.prepare(reward_fn)
+
+        # ==========
+
         mean_rewards = []
         for epoch in range(self.config.train.num_epochs):
 
             all_step_preds, log_probs, advantages, all_prompts, all_rewards = [], [], [], [], []
 
             # sampling `num_samples_per_epoch` images and calculating rewards
-            for i, prompts in enumerate(tqdm(self.dataloader, disable=not self.accelerator.is_local_main_process)):
-                batch_imgs, rewards, batch_all_step_preds, batch_log_probs = self.sample_and_calculate_rewards(prompts)
+            for i, prompts in enumerate(tqdm(dataloader, disable=not self.accelerator.is_local_main_process)):
+                batch_imgs, rewards, batch_all_step_preds, batch_log_probs = self.sample_and_calculate_rewards(prompts, reward_fn)
                 batch_advantages = torch.from_numpy(per_prompt_stat_tracker.update(np.array(prompts), rewards.squeeze().cpu().detach().numpy())).float().to(self.accelerator.device)
                 all_step_preds.append(batch_all_step_preds)
                 log_probs.append(batch_log_probs)
