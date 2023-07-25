@@ -17,8 +17,18 @@ class AverageBlueReward(RewardModel):
     def __init__(self):
         super().__init__()
 
-    def forward(self, pixel_values, input_ids, attention_mask):
-        return pixel_values[:, 2].mean(dim = 1)
+    def forward(self, images, prompts):
+        # If the input is a list of PIL Images, convert to numpy array
+        if isinstance(images, list):
+            images = np.array([np.array(img) for img in images])
+
+        blue_channel = images[:,:,:,2]  # N x 256 x 256
+
+        # Calculate the mean of the blue channel for each image
+        blueness = blue_channel.astype(float).mean(axis=(1,2))  # N
+        blueness = (2 * blueness - 255)/255 # normalize to [0,1]
+
+        return torch.from_numpy(blueness)
     
 class JPEGCompressability(RewardModel):
     """
@@ -28,7 +38,8 @@ class JPEGCompressability(RewardModel):
         super().__init__()
         self.quality = quality
 
-    def forward(self, pixel_values, input_ids, attention_mask):
+    def forward(self, images, prompts):
+        pixel_values = torch.from_numpy(images).permute(0, 3, 1, 2) / 255
         batch_size = pixel_values.shape[0]
         compressed_sizes = torch.empty(batch_size)
 

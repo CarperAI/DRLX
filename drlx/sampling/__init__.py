@@ -18,11 +18,11 @@ class Sampler:
         self.config = config
 
     def sample(self, use_grad = False, **kwargs):
-    if not use_grad:
-        with torch.no_grad():
-            return _sample(**kwargs)
-    else:
-        return _sample(**kwargs)
+        if not use_grad:
+            with torch.no_grad():
+                return self._sample(**kwargs)
+        else:
+            return self._sample(**kwargs)
 
     def _sample(self, prompts : Iterable[str], denoiser, guidance_scale = None, num_inference_steps = None, eta = None, device = None) -> Any:
         guidance_scale = self.config.guidance_scale
@@ -31,7 +31,7 @@ class Sampler:
 
         scheduler = denoiser.scheduler
         
-        text_embeds = denoiser.preprocess(prompts, mode = "embeds", device, 1, do_classifier_free_guidance=guidance_scale > 1.0).detach()
+        text_embeds = denoiser.preprocess(prompts, mode = "embeds", device = device, num_images_per_prompt = 1, do_classifier_free_guidance=guidance_scale > 1.0).detach()
 
         scheduler.set_timesteps(num_inference_steps, device = device)
         latents = torch.randn(len(prompts), *denoiser.get_input_shape(), device = device)
@@ -68,7 +68,7 @@ class Sampler:
 
 class LDMSampler(Sampler):
     @torch.no_grad()
-    def sample(self, prompt, denoiser, **kwargs):
+    def _sample(self, prompt, denoiser, **kwargs):
         latents = super().sample(prompt, denoiser, **kwargs)
         if self.config.postprocess:
             return denoiser.postprocess(latents)
@@ -105,7 +105,7 @@ class DDPOSampler(Sampler):
         eta = self.config.eta
         num_inference_steps = self.config.num_inference_steps
 
-        text_embeds = denoiser.preprocess(prompts, mode = "embeds", device, 1, do_classifier_free_guidance=guidance_scale > 1.0).detach()
+        text_embeds = denoiser.preprocess(prompts, mode = "embeds", device = device, num_images_per_prompt = 1, do_classifier_free_guidance=guidance_scale > 1.0).detach()
 
         scheduler.set_timesteps(num_inference_steps, device = device)
         latents = torch.randn(len(prompts), *denoiser.get_input_shape(), device = device)

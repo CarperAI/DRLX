@@ -27,8 +27,7 @@ class RewardModel(nn.Module):
     @abstractmethod
     def forward(
         self,
-        pixel_values : TensorType["batch", "channels", "height", "width"], 
-        input_ids : TensorType["batch", "seq_len"],
-        attention_mask : TensorType["batch", "seq_len"]
+        images : Iterable[Image.Image],
+        prompts : Iterable[str]
     ) -> TensorType["batch"]:
         pass

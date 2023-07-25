@@ -1,5 +1,5 @@
 from abc import abstractmethod
-from typing import Callable, Iterable, Tuple
+from typing import Callable, Iterable, Tuple, Any
 
 from PIL import Image
 
@@ -7,10 +7,19 @@ import torch
 from torch.utils.data import DataLoader, Dataset
 
 class Pipeline(Dataset):
-    def __init__(self):
+    """
+    Pipeline to use for data whe training some RL model
+
+    :param prep_fn: Function that will be called on iterable of data elements from the pipeline. Typically takes a list of prompts and tokenizes them. Often should just be set to a models preprocessing function.
+    :type prep_fn: Callable
+    """
+    def __init__(self, prep_fn : Callable = None):
         super().__init__()
 
-        self.prep : Callable = lambda x: x # identity by default
+        if not prep_fn:
+            self.prep : Callable = lambda x: x # identity by default
+        else:
+            self.prep = prep_fn
 
     def create_train_loader(self, **kwargs) -> DataLoader:
         # By default just create_loader
@@ -30,13 +39,7 @@ class Pipeline(Dataset):
 
         return collate
 
-    def set_preprocess_fn(self, fn : Callable):
-        """
-        Set the preprocess function that will be applied to data loaded through data loader
-        """
-        self.prep = fn
-
-    def create_loader(self, accelerate : bool = False, device : torch.device = None, **kwargs) -> DataLoader:
+    def create_loader(self, **kwargs) -> DataLoader:
         if self.prep is None:
             raise ValueError("Preprocessing function must be set before creating a dataloader.")
 
@@ -44,3 +47,16 @@ class Pipeline(Dataset):
             del kwargs['shuffle']
 
         return DataLoader(self, collate_fn = self.make_default_collate(self.prep), **kwargs)
+
+class PromptPipeline(Pipeline):
+    """
+    Base class for a pipeline that provides text prompts.
+    """
+
+    @classmethod
+    def make_default_collate(self, prep : Callable):
+        def collate(batch : Iterable[str]):
+            return prep(batch)
+
+        return collate
+    

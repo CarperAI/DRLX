@@ -7,7 +7,7 @@ import yaml
 
 @dataclass
 class ConfigClass:
-    @staticmethod
+    @classmethod
     def from_dict(cls, cfg : Dict[str, Any]):
         return cls(**cfg)
 
@@ -40,7 +40,6 @@ def register_method(name):
 
     return cls
 
-
 @dataclass
 @register_method
 class MethodConfig(ConfigClass):
@@ -51,8 +50,7 @@ class MethodConfig(ConfigClass):
     :type name: str
     """
 
-    name: str
-
+    name: str = None
 
 def get_method(name: str) -> MethodConfig:
     """
@@ -63,12 +61,12 @@ def get_method(name: str) -> MethodConfig:
         return _METHODS[name]
     else:
         raise Exception("Error: Trying to access a method that has not been registered")
-
    
+@register_method("DDPO")
 @dataclass
 class DDPOConfig(MethodConfig):
     """
-    Config for DDPO-related hyperparameters
+    Config for DDPO-related hyperparameters including per prompt stat tracker
     
     :param clip_advantages: Maximum absolute value of advantages
     :type clip_advantages: float
@@ -81,18 +79,7 @@ class DDPOConfig(MethodConfig):
 
     :param sample_batch_size: Number of samples to use for each training step
     :type sample_batch_size: int
-    """
-    clip_advantages: float = 1.0
-    clip_ratio: float = 0.2
-    num_inner_epochs: int = 1
-    sample_batch_size: int = 32
 
-
-@dataclass
-class PerPromptStatTrackerConfig(ConfigClass):
-    """
-    Config for PerPromptStatTracker
-    
     :param buffer_size: Number of samples to keep in the buffer
     :type buffer_size: int
 
@@ -100,28 +87,14 @@ class PerPromptStatTrackerConfig(ConfigClass):
         calculating statistics
     :type min_count: int
     """
-    buffer_size: int = 32
+    name : str = "DDPO"
+    clip_advantages: float = 1.0
+    clip_ratio: float = 0.2
+    num_inner_epochs: int = 1
+    sample_batch_size: int = 32
+
+    buffer_size: int = 32 # Set to None to avoid using per prompt stat tracker
     min_count: int = 16
-
-
-@dataclass
-class RewardModelConfig(ConfigClass):
-    """
-    Config for reward model
-
-    :param name: Name of the reward model
-    :type name: str
-
-    :param kwargs: Keyword arguments for the reward model
-    :type kwargs: Dict[str, Any]
-    
-    :param model_path: Path or name of the model (local or on huggingface hub)
-    :type model_path: str
-    """
-    name: str
-    kwargs: Dict[str, Any] = field(default_factory=dict)
-    model_path: str = None
-
 
 @dataclass
 class TrainConfig(ConfigClass):
@@ -197,7 +170,7 @@ class OptimizerConfig(ConfigClass):
     :type kwargs: Dict[str, Any]
     """
 
-    name: str
+    name: str = None
     kwargs: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -213,7 +186,7 @@ class SchedulerConfig(ConfigClass):
     :type kwargs: Dict[str, Any]
     """
 
-    name: str
+    name: str = None
     kwargs: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -241,21 +214,21 @@ class ModelConfig(ConfigClass):
     :type peft_config: Union[peft.PeftConfig, Dict[str, Any]]
     """
 
-    model_path: str
-    model_arch_type: str
+    model_path: str = None
+    model_arch_type: str = None
     peft_config: Dict[str, Any] = field(default_factory=dict) # TODO: add PEFT support
 
 
 
 @dataclass
-class SamplerConfig(ConfigClass): # TODO: is this needed?
+class SamplerConfig(ConfigClass):
     mode : str = "v" # x, v, or eps
     guidance_scale : float = 5.0 # if guidance is being used
     sigma_data : float = 0.5 # Estimated sd for data
     num_inference_steps : int = 50
     eta : float = 1
     postprocess : bool = False # If true, post processes latents to images (uint8 np arrays)
-
+    img_size : int = 512
 
 def load_yaml(yml_fp : str) -> Dict[str, ConfigClass]:
     with open(yml_fp, mode = 'r') as file:
@@ -303,9 +276,6 @@ class DRLXConfig(ConfigClass):
     :param logging: Logging config
     :type logging: LoggingConfig
 
-    :param reward_model: Reward model config
-    :type reward_model: RewardModelConfig
-    
     :param method: Method config
     :type method: MethodConfig
 
@@ -315,14 +285,12 @@ class DRLXConfig(ConfigClass):
     :
     """
 
-    model: ModelConfig
-    optimizer: OptimizerConfig
-    scheduler: SchedulerConfig
-    train: TrainConfig
-    logging: LoggingConfig
-    reward_model: RewardModelConfig
-    method: MethodConfig
-    per_prompt_stat_tracker: PerPromptStatTrackerConfig = None
+    model: ModelConfig = ModelConfig()
+    optimizer: OptimizerConfig = OptimizerConfig()
+    scheduler: SchedulerConfig = SchedulerConfig()
+    train: TrainConfig = TrainConfig()
+    logging: LoggingConfig = LoggingConfig()
+    method: MethodConfig = MethodConfig()
 
     @classmethod
     def load_yaml(cls, yml_fp: str):
@@ -346,9 +314,7 @@ class DRLXConfig(ConfigClass):
             "optimizer": self.optimizer.__dict__,
             "scheduler": self.scheduler.__dict__,
             "train": self.train.__dict__,
-            "logging": self.logging.__dict__,
-            "reward_model": self.reward_model.__dict__,
-            "per_prompt_stat_tracker": self.per_prompt_stat_tracker.__dict__,
+            "logging": self.logging.__dict__
         }
 
         return data
@@ -365,10 +331,6 @@ class DRLXConfig(ConfigClass):
             scheduler=SchedulerConfig.from_dict(config["scheduler"]),
             train=TrainConfig.from_dict(config["train"]),
             logging=LoggingConfig.from_dict(config["logging"]),
-            reward_model=RewardModelConfig.from_dict(config["reward_model"]),
-            per_prompt_stat_tracker=PerPromptStatTrackerConfig.from_dict(
-                config["per_prompt_stat_tracker"]
-            ),
         )
 
     @classmethod
