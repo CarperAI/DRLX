@@ -10,12 +10,25 @@ from drlx.configs import SamplerConfig
 # Credit to Tanishq Abraham (tmabraham) for notebook from which
 # both sampler and ddpo sampler code was adapted
 
+# TODO: Normal sampler doesn't work with accelerate
 class Sampler:
     """
     Generic class for sampling generations using a denoiser. Assumes LDMUnet
     """
     def __init__(self, config : SamplerConfig = SamplerConfig()):
         self.config = config
+
+        # Can't infer from denoiser when using accelerate
+        self.accelerated = False
+        self.scheduler = None
+        self.preprocess = None
+        self.noise_shape = None
+
+    def set_denoiser_fns(self, denoiser):
+        self.scheduler = denoiser.scheduler
+        self.preprocess = denoiser.preprocess
+        self.noise_shape = denoiser.get_input_shape()
+        self.accelerated = True
 
     def sample(self, use_grad = False, **kwargs):
         if not use_grad:
@@ -30,7 +43,6 @@ class Sampler:
         eta = self.config.eta
 
         scheduler = denoiser.scheduler
-        
         text_embeds = denoiser.preprocess(prompts, mode = "embeds", device = device, num_images_per_prompt = 1, do_classifier_free_guidance=guidance_scale > 1.0).detach()
 
         scheduler.set_timesteps(num_inference_steps, device = device)
@@ -82,8 +94,13 @@ class DDPOSampler(Sampler):
         log_probs = -((prev_sample.detach() - prev_sample_mean) ** 2) / (2 * std_dev_t ** 2) - torch.log(std_dev_t) - math.log(math.sqrt(2 * math.pi))
         return log_probs.mean(dim=tuple(range(1, prev_sample_mean.ndim)))
 
-    def _sample(self, prompts : Iterable[str], denoiser, device = None, show_progress : bool = False,
-     advantages = None, old_preds = None, old_log_probs = None, method_config : 'DDPOConfig' = None
+    def _sample(
+        self,
+        prompts : Iterable[str], denoiser, device = None,
+        show_progress : bool = False,
+        advantages = None, old_preds = None, old_log_probs = None,
+        method_config : 'DDPOConfig' = None,
+        accelerator = None
      ) -> Any:
         """
         Using model and prompts, sample for DDPO training. In normal state, samples final samples from prompts with denoiser.
@@ -100,15 +117,24 @@ class DDPOSampler(Sampler):
             old_preds = old_preds.to(device)
             old_log_probs = old_log_probs.to(device)
 
-        scheduler = denoiser.scheduler
+        if not self.accelerated:
+            scheduler = denoiser.scheduler
+            preprocess = denosier.preprocess
+            noise_shape = denoiser.get_input_shape()
+
+        else:
+            scheduler = self.scheduler
+            preprocess = self.preprocess
+            noise_shape = self.noise_shape
+
         guidance_scale = self.config.guidance_scale
         eta = self.config.eta
         num_inference_steps = self.config.num_inference_steps
 
-        text_embeds = denoiser.preprocess(prompts, mode = "embeds", device = device, num_images_per_prompt = 1, do_classifier_free_guidance=guidance_scale > 1.0).detach()
+        text_embeds = preprocess(prompts, mode = "embeds", device = device, num_images_per_prompt = 1, do_classifier_free_guidance=guidance_scale > 1.0).detach()
 
         scheduler.set_timesteps(num_inference_steps, device = device)
-        latents = torch.randn(len(prompts), *denoiser.get_input_shape(), device = device)
+        latents = torch.randn(len(prompts), *noise_shape, device = device)
 
         all_step_preds, all_log_probs = [latents], []
         total_loss = 0.
@@ -116,7 +142,7 @@ class DDPOSampler(Sampler):
         for i, t in enumerate(tqdm(scheduler.timesteps, disable=not show_progress)):
             if compute_loss:
                 clipped_advantages = torch.clip(advantages, -method_config.clip_advantages, method_config.clip_advantages).detach()
-            
+
             input = torch.cat([old_preds[i].detach() if compute_loss else latents] * 2)
             input = scheduler.scale_model_input(input, t)
 
@@ -151,7 +177,10 @@ class DDPOSampler(Sampler):
                 surr1 = -clipped_advantages * ratio
                 surr2 = -clipped_advantages *  torch.clip(ratio, 1. - method_config.clip_ratio, 1. + method_config.clip_ratio)
                 loss = torch.max(surr1, surr2).mean()
-                loss.backward()
+                if accelerator is not None:
+                    accelerator.backward(loss)
+                else:
+                    loss.backward()
                 total_loss += loss.item()
             else:
                 all_step_preds.append(prev_sample)
@@ -161,7 +190,7 @@ class DDPOSampler(Sampler):
         if compute_loss:
             return total_loss
         else:
-            return latents, all_step_preds, all_log_probs
+            return latents, torch.stack(all_step_preds), torch.stack(all_log_probs)
 
 
 
