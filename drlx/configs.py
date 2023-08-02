@@ -131,8 +131,8 @@ class TrainConfig(ConfigClass):
     batch_size: int = 4
     sample_batch_size: int = 8
     num_epochs: int = 50
-    total_samples: int = None
-    num_samples_per_epoch: int = 128
+    total_samples: int = 5e+4
+    num_samples_per_epoch: int = 256
     grad_clip: float = 1.0
     checkpoint_interval: int = 10
     checkpoint_path: str = "checkpoints"
