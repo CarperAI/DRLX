@@ -118,3 +118,12 @@ def get_diffusion_pipeline_class(name: DiffusionPipelineName):
         return StableDiffusionPipeline
     supported_diffusion_pipelines = [d.value for d in DiffusionPipelineName]
     raise ValueError(f"`{name}` is not a supported diffusion pipeline. " f"Supported diffusion pipelines are: {supported_diffusion_pipelines}")
+
+def any_chunk(x, chunk_size):
+    """
+    Chunks any iterable by chunk size
+    """
+    is_tensor = isinstance(x, torch.Tensor)
+
+    x_chunks = [x[i:i+chunk_size] for i in range(0, len(x), chunk_size)]
+    return torch.stack(x_chunks) if is_tensor else x_chunks
