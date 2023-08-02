@@ -104,8 +104,14 @@ class TrainConfig(ConfigClass):
     :param batch_size: Batch size
     :type batch_size: int
 
+    :param sample_batch_size: Batch size to use during inference only
+    :type sample_batch_size: int
+
     :param num_epochs: Number of epochs to train for
     :type num_epochs: int
+
+    :param total_samples: Provide this as alternative to epochs. Computes required epochs to see this may samples.
+    :type total_samples: int
 
     :param num_samples_per_epoch: Number of samples to use per epoch
     :type num_samples_per_epoch: int
@@ -123,7 +129,9 @@ class TrainConfig(ConfigClass):
     :type seed: int
     """
     batch_size: int = 4
+    sample_batch_size: int = 8
     num_epochs: int = 50
+    total_samples: int = None
     num_samples_per_epoch: int = 128
     grad_clip: float = 1.0
     checkpoint_interval: int = 10
@@ -153,9 +161,11 @@ class LoggingConfig(ConfigClass):
     """
     log_with: str = "wandb" # "wandb" or "tensorboard"
     log_every: int = 10
+    log_dir: str = None
     run_name: str = None
     wandb_entity: str = None
     wandb_project: str = None
+
 
 
 @dataclass
@@ -278,14 +288,10 @@ class DRLXConfig(ConfigClass):
 
     :param method: Method config
     :type method: MethodConfig
-
-    :param per_prompt_stat_tracker: Config for PerPromptStatTracker (optional)
-    :type per_prompt_stat_tracker: PerPromptStatTrackerConfig
-
-    :
     """
 
     model: ModelConfig = ModelConfig()
+    sampler: SamplerConfig = SamplerConfig()
     optimizer: OptimizerConfig = OptimizerConfig()
     scheduler: SchedulerConfig = SchedulerConfig()
     train: TrainConfig = TrainConfig()
@@ -311,6 +317,7 @@ class DRLXConfig(ConfigClass):
         data = {
             "method": self.method.__dict__,
             "model": self.model.__dict__,
+            "sampler": self.sampler.__dict__,
             "optimizer": self.optimizer.__dict__,
             "scheduler": self.scheduler.__dict__,
             "train": self.train.__dict__,
@@ -327,6 +334,7 @@ class DRLXConfig(ConfigClass):
         return cls(
             method=get_method(config["method"]["name"]).from_dict(config["method"]),
             model=ModelConfig.from_dict(config["model"]),
+            sampler=SamplerConfig.from_dict(config["sampler"]),
             optimizer=OptimizerConfig.from_dict(config["optimizer"]),
             scheduler=SchedulerConfig.from_dict(config["scheduler"]),
             train=TrainConfig.from_dict(config["train"]),
