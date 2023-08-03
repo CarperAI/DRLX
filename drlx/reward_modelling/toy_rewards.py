@@ -47,5 +47,5 @@ class JPEGCompressability(RewardModel):
         return len(bytes) / 1000
 
     def forward(self, images, prompts):
-        scores = [self.encode_jpeg(img) for img in images]
+        scores = [-1 * self.encode_jpeg(img) for img in images]
         return torch.tensor(scores)
