@@ -104,6 +104,9 @@ class TrainConfig(ConfigClass):
     :param batch_size: Batch size
     :type batch_size: int
 
+    :param target_batch: Target batch size with gradient accumulation
+    :type target_batch: int
+
     :param sample_batch_size: Batch size to use during inference only
     :type sample_batch_size: int
 
@@ -127,8 +130,12 @@ class TrainConfig(ConfigClass):
 
     :param seed: Random seed
     :type seed: int
+
+    :suppress_log_keywords: List of prefixes for loggers to suppress warnings from during training. Type as single string with different prefixes delimited by commas.
+    :type suppress_log_keywords: str
     """
     batch_size: int = 4
+    target_batch: int = 64
     sample_batch_size: int = 8
     num_epochs: int = 50
     total_samples: int = 5e+4
@@ -137,6 +144,7 @@ class TrainConfig(ConfigClass):
     checkpoint_interval: int = 10
     checkpoint_path: str = "checkpoints"
     seed: int = 0
+    suppress_log_keywords: str = None
 
 
 @dataclass
@@ -146,9 +154,6 @@ class LoggingConfig(ConfigClass):
 
     :param log_with: Logging backend to use (either "wandb" or "tensorboard")
     :type log_with: str
-
-    :param log_every: Number of steps between logging
-    :type log_every: int
 
     :param run_name: Name of the run
     :type run_name: str
@@ -160,7 +165,6 @@ class LoggingConfig(ConfigClass):
     :type wandb_project: str
     """
     log_with: str = "wandb" # "wandb" or "tensorboard"
-    log_every: int = 10
     log_dir: str = None
     run_name: str = None
     wandb_entity: str = None
