@@ -6,6 +6,7 @@ from collections import deque
 from drlx.configs import DRLXConfig, DDPOConfig
 from drlx.trainer import BaseTrainer
 from drlx.sampling import DDPOSampler
+from drlx.utils import suppress_warnings, Timer
 
 import torch
 import einops as eo
@@ -105,11 +106,24 @@ class DDPOTrainer(BaseTrainer):
 
         assert isinstance(self.config.method, DDPOConfig), "ERROR: Method config must be DDPO config"
 
-        self.accelerator = Accelerator(log_with = config.logging.log_with) # TODO: Add accelerator args
+        # Figure out batch size and accumulation steps
+        self.accum_steps = self.config.sampler.num_inference_steps
+        if self.config.train.target_batch is not None: # Just use normal batch_size
+            self.accum_steps *= (self.config.train.target_batch // self.config.train.batch_size)
+            
+
+        self.accelerator = Accelerator(
+            log_with = config.logging.log_with,
+            gradient_accumulation_steps = self.accum_steps
+        ) # TODO: Add accelerator args
 
         # Disable tokenizer warnings since they clutter the CLI
-        logging.getLogger("pytorch_transformers.tokenization_utils").setLevel(logging.ERROR)
+        kw_str = self.config.train.suppress_log_keywords
+        if kw_str is not None:
+            for prefix in kw_str.split(","):
+                suppress_warnings(prefix.strip())
 
+        
         self.model = self.setup_model()
         self.optimizer = self.setup_optimizer()
         self.scheduler = self.setup_scheduler()
@@ -149,73 +163,17 @@ class DDPOTrainer(BaseTrainer):
         return model
 
     def loss(self, x_t, log_probs_t, advantages, prompts):
-        return self.sampler.sample(
-            use_grad=True,
+        return self.sampler.compute_loss(
             prompts=prompts,
             denoiser=self.model,
             device=self.accelerator.device,
             advantages=advantages,
             old_preds=x_t,
             old_log_probs=log_probs_t,
-            show_progress=self.accelerator.is_local_main_process,
+            show_progress=self.accelerator.is_main_process,
             method_config=self.config.method,
             accelerator=self.accelerator
         )
-
-    # TODO: Remove if we can verify above function works
-    def _loss(self, x_t, log_probs_t, advantages, prompts):
-        """
-        Computes the loss for a batch and returns a tuple containing the loss and
-        a dictionary of metrics to log.
-
-        Args:
-            x_t (torch.Tensor): The batch of intermediate images
-            log_probs_t (torch.Tensor): The log probabilities of the intermediate images
-            advantages (torch.Tensor): The advantages of the final images
-            prompts (list[str]): The prompts used to generate the batch
-
-        """
-
-        x_t = x_t.to(self.accelerator.device)
-        log_probs_t = log_probs_t.to(self.accelerator.device)
-        advantages = advantages.to(self.accelerator.device)
-
-        scheduler = self.model.scheduler
-        unet = self.model.unet
-        text_embeddings = self.model.preprocess(prompts, mode = "embeds", device = self.accelerator.device, num_images_per_prompt= 1, do_classifier_free_guidance=self.config.sampler.guidance_scale > 1.0).detach()
-        scheduler.set_timesteps(self.config.sampler.num_inference_steps, device=self.accelerator.device)
-        loss_value = 0.
-        for i, t in enumerate(tqdm(self.model.scheduler.timesteps, disable=not self.accelerator.is_local_main_process)): # note that we need to redo the sampling stuff since before with no_grad (may be possible to refactor)
-            clipped_advantages = torch.clip(advantages, -self.config.method.clip_advantages, self.config.method.clip_advantages).detach()
-        
-            input = torch.cat([x_t[i].detach()] * 2)
-            input = scheduler.scale_model_input(input, t)
-
-            # predict the noise residual
-            pred = unet(input, t, encoder_hidden_states=text_embeddings).sample
-
-            # perform guidance
-            pred_uncond, pred_text = pred.chunk(2)
-            pred = pred_uncond + self.config.sampler.guidance_scale * (pred_text - pred_uncond)
-
-            # compute the "previous" noisy sample mean and variance, and get log probs
-            scheduler_output = scheduler.step(pred, t, x_t[i].detach(), self.config.sampler.eta, variance_noise=0)
-            t_1 = t - scheduler.config.num_train_timesteps // self.config.sampler.num_inference_steps
-            variance = scheduler._get_variance(t, t_1)
-            std_dev_t = self.config.sampler.eta * variance ** (0.5)
-            prev_sample_mean = scheduler_output.prev_sample
-            current_log_probs = self.sampler.calc_log_probs(x_t[i+1].detach(), prev_sample_mean, std_dev_t)
-
-            # calculate loss
-
-            ratio = torch.exp(current_log_probs - log_probs_t[i].detach()) # this is the ratio of the new policy to the old policy
-            unclipped_loss = -clipped_advantages * ratio # this is the surrogate loss
-            clipped_loss = -clipped_advantages * torch.clip(ratio, 1. - self.config.method.clip_ratio, 1. + self.config.method.clip_ratio) # this is the surrogate loss, but with artificially clipped ratios
-            loss = torch.max(unclipped_loss, clipped_loss).mean() # we take the max of the clipped and unclipped surrogate losses, and take the mean over the batch
-            self.accelerator.backward(loss)
-            loss_value += loss.item()
-
-        return loss_value
     
     def sample(self, prompts):
         preds, all_preds, log_probs = self.sampler.sample(
@@ -239,6 +197,10 @@ class DDPOTrainer(BaseTrainer):
 
         rewards = reward_fn(imgs, prompts).to(self.accelerator.device)
         return imgs, rewards, all_preds, log_probs
+    
+    def print_in_main(self, txt):
+        if self.accelerator.is_main_process:
+            print(txt)
     
     def train(self, prompt_pipeline, reward_fn):
         """
@@ -270,16 +232,22 @@ class DDPOTrainer(BaseTrainer):
         # Set the epoch count
         outer_epochs = self.config.train.num_epochs
         if self.config.train.total_samples is not None:
-            outer_epochs = self.config.train.total_samples // num_samples_per_epoch
+            outer_epochs = int(self.config.train.total_samples // self.config.train.num_samples_per_epoch)
 
-        # ==========
+        # Timer to measure time per 1k images (as metric)
+        timer = Timer()
+        def time_per_1k(n_samples : int):
+            total_time = timer.hit()
+            return total_time * 1000 / n_samples
+
+        # === MAIN TRAINING LOOP ===
 
         mean_rewards = []
         accum = 0
+        last_epoch_time = timer.hit()
         for epoch in range(outer_epochs):
-
             preds, all_step_preds, log_probs, all_prompts = [], [], [], []
-
+            self.print_in_main(f"Epoch {epoch}/{outer_epochs}. {epoch * self.config.train.num_samples_per_epoch} samples seen. Averaging {last_epoch_time:.2f}s/1k samples.")
             # Make a new dataloader to reshuffle data
             dataloader = self.accelerator.prepare(
                 prompt_pipeline.create_train_loader(batch_size = self.config.train.sample_batch_size, shuffle = True)
@@ -287,7 +255,8 @@ class DDPOTrainer(BaseTrainer):
 
             # Sample (play the game)
             data_steps = self.config.train.num_samples_per_epoch // self.config.train.sample_batch_size // self.world_size
-            for i, prompts in enumerate(tqdm(dataloader, total = data_steps, disable=not self.accelerator.is_local_main_process)):            
+            self.print_in_main("Sampling...")
+            for i, prompts in enumerate(tqdm(dataloader, total = data_steps, disable=not self.accelerator.is_main_process)):            
                 batch_preds, batch_all_step_preds, batch_log_probs = self.sample(prompts)
                 
                 preds.append(batch_preds)
@@ -303,6 +272,8 @@ class DDPOTrainer(BaseTrainer):
             self.model = self.accelerator.unwrap_model(self.model)
             imgs = [self.model.postprocess(pred) for pred in preds]
 
+            # Experience replay computes normalized rewards,
+            # then is used to create a loader for training
             exp_replay = DDPOExperienceReplay(
                 reward_fn, per_prompt_stat_tracker,
                 imgs, all_prompts,
@@ -323,30 +294,46 @@ class DDPOTrainer(BaseTrainer):
                 self.accelerator.log({
                     "mean_reward" : all_rewards.mean().item(),
                     "reward_hist" : wandb.Histogram(all_rewards.detach().cpu().numpy()),
+                    "time_per_1k" : last_epoch_time,
                     "img_batch" : batch_imgs,
                     "img_sample" : sample_imgs
                 })
 
+            # Inner epochs and actual training
+            self.print_in_main("Training...")
             self.model, experience_loader = self.accelerator.prepare(self.model, experience_loader)
-            for inner_epoch in tqdm(range(self.config.method.num_inner_epochs), disable=not self.accelerator.is_local_main_process):
-                for (all_step_preds, log_probs, advantages, prompts) in tqdm(experience_loader, disable=not self.accelerator.is_local_main_process):
-                    self.optimizer.zero_grad()
-                    loss = self.loss(all_step_preds, log_probs, advantages, prompts)
-                    self.accelerator.clip_grad_norm_(self.model.parameters(), self.config.train.grad_clip)
-                    self.optimizer.step()
-                    self.scheduler.step()
+            # Inner epochs normally one, disable progress bar when this is the case 
+            for inner_epoch in tqdm(range(self.config.method.num_inner_epochs),
+                disable=(not self.accelerator.is_main_process) or (self.config.method.num_inner_epochs == 1)
+            ):
+                for (all_step_preds, log_probs, advantages, prompts) in tqdm(experience_loader, disable=not self.accelerator.is_main_process):
+                    with self.accelerator.accumulate(self.model): # Accumulate across time steps and minibatches
+                        loss = self.loss(all_step_preds, log_probs, advantages, prompts)
+                        self.accelerator.clip_grad_norm_(self.model.parameters(), self.config.train.grad_clip)
+                        self.optimizer.step()
+                        self.scheduler.step()
+                        self.optimizer.zero_grad()
 
-                    accum += 1
-                    if accum % self.config.train.checkpoint_interval == 0 \
-                    and self.config.train.checkpoint_interval > 0:
-                        base_path = f"checkpoints/{self.config.logging.run_name}"
-                        if not os.path.exists(base_path):
-                            os.makedirs(base_path)
-                        self.save_checkpoint(f"{base_path}/{accum}")
+            # Save model every [interval] epochs
+            accum += 1
+            if accum % self.config.train.checkpoint_interval == 0 \
+            and self.config.train.checkpoint_interval > 0:
+                self.print_in_main("Saving...")
+                base_path = f"checkpoints/{self.config.logging.run_name}"
+                if not os.path.exists(base_path) and self.accelerator.is_main_process:
+                    os.makedirs(base_path)
+                self.save_checkpoint(f"{base_path}/{accum}")
 
+            last_epoch_time = time_per_1k(self.config.train.num_samples_per_epoch)
+            
+            del loss, experience_loader
 
     def save_checkpoint(self, fp, components = None):
-        self.accelerator.save_state(output_dir=fp)
+        if self.accelerator.is_main_process:
+            self.accelerator.save_state(output_dir=fp)
+        self.accelerator.wait_for_everyone()
+        
 
     def load_checkpoint(self, fp):
         self.accelerator.load_state(fp)
+        self.print_in_main("Succesfully loaded checkpoint")
