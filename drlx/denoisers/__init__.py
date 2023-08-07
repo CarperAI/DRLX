@@ -20,6 +20,9 @@ class BaseConditionalDenoiser(nn.Module):
         assert sampler_config is not None or sampler is not None, "Must provide one of sampler_config or sampler to model init"
         self.sampler = Sampler(sampler_config) if sampler_config is not None else sampler
     
+    def sample(self, **kwargs):
+        return self.sampler.sample(**kwargs)
+        
     @abstractmethod
     def get_input_shape(self) -> Tuple:
         pass

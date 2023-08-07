@@ -7,22 +7,8 @@ from typing import Any, Dict, Iterable, Tuple
 import torch
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR
 from diffusers import StableDiffusionPipeline
-
-
-def get_latest_checkpoint(root_dir):
-    """
-    Assume folder root_dir stores checkpoints for model, all named numerically (in terms of training steps associated with said checkpoints).
-    This function returns the path to the latest checkpoint, aka the subfolder with largest numerical name. Returns none if the root dir is empty
-    """
-    subdirs = glob.glob(os.path.join(checkpoint_root, '*'))
-    if not subdirs:
-        return None
-    
-    # Filter out any paths that are not directories or are not numeric
-    subdirs = [s for s in subdirs if os.path.isdir(s) and os.path.basename(s).isdigit()]
-    # Find the maximum directory number (assuming all subdirectories are numeric)
-    latest_checkpoint = max(subdirs, key=lambda s: int(os.path.basename(s)))
-    return latest_checkpoint
+import logging
+import time
 
 #TODO: is this needed?
 def infinite_dataloader(dataloader: Iterable, sampler=None) -> Iterable:
@@ -118,3 +104,47 @@ def get_diffusion_pipeline_class(name: DiffusionPipelineName):
         return StableDiffusionPipeline
     supported_diffusion_pipelines = [d.value for d in DiffusionPipelineName]
     raise ValueError(f"`{name}` is not a supported diffusion pipeline. " f"Supported diffusion pipelines are: {supported_diffusion_pipelines}")
+
+def any_chunk(x, chunk_size):
+    """
+    Chunks any iterable by chunk size
+    """
+    is_tensor = isinstance(x, torch.Tensor)
+
+    x_chunks = [x[i:i+chunk_size] for i in range(0, len(x), chunk_size)]
+    return torch.stack(x_chunks) if is_tensor else x_chunks
+
+def suppress_warnings(prefix : str):
+    """
+    With logging module, suppresses any warnings that are coming from a logger
+    with a given prefix
+    """
+
+    names = logging.root.manager.loggerDict
+    names = list(filter(lambda x: x.startswith(prefix), names))
+    for name in names:
+        logging.getLogger(name).setLevel(logging.ERROR)
+    
+class Timer:
+    def __init__(self):
+        self.time = time.time()
+    def hit(self):
+        new_time = time.time()
+        res = new_time - self.time
+        self.time = new_time
+        return res
+
+def get_latest_checkpoint(checkpoint_root):
+    """
+    Assume folder root_dir stores checkpoints for model, all named numerically (in terms of training steps associated with said checkpoints).
+    This function returns the path to the latest checkpoint, aka the subfolder with largest numerical name. Returns none if the root dir is empty
+    """
+    subdirs = glob.glob(os.path.join(checkpoint_root, '*'))
+    if not subdirs:
+        return None
+    
+    # Filter out any paths that are not directories or are not numeric
+    subdirs = [s for s in subdirs if os.path.isdir(s) and os.path.basename(s).isdigit()]
+    # Find the maximum directory number (assuming all subdirectories are numeric)
+    latest_checkpoint = max(subdirs, key=lambda s: int(os.path.basename(s)))
+    return latest_checkpoint

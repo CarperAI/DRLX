@@ -104,8 +104,17 @@ class TrainConfig(ConfigClass):
     :param batch_size: Batch size
     :type batch_size: int
 
+    :param target_batch: Target batch size with gradient accumulation
+    :type target_batch: int
+
+    :param sample_batch_size: Batch size to use during inference only
+    :type sample_batch_size: int
+
     :param num_epochs: Number of epochs to train for
     :type num_epochs: int
+
+    :param total_samples: Provide this as alternative to epochs. Computes required epochs to see this may samples.
+    :type total_samples: int
 
     :param num_samples_per_epoch: Number of samples to use per epoch
     :type num_samples_per_epoch: int
@@ -121,14 +130,21 @@ class TrainConfig(ConfigClass):
 
     :param seed: Random seed
     :type seed: int
+
+    :suppress_log_keywords: List of prefixes for loggers to suppress warnings from during training. Type as single string with different prefixes delimited by commas.
+    :type suppress_log_keywords: str
     """
     batch_size: int = 4
+    target_batch: int = 64
+    sample_batch_size: int = 8
     num_epochs: int = 50
-    num_samples_per_epoch: int = 128
+    total_samples: int = 5e+4
+    num_samples_per_epoch: int = 256
     grad_clip: float = 1.0
     checkpoint_interval: int = 10
     checkpoint_path: str = "checkpoints"
     seed: int = 0
+    suppress_log_keywords: str = None
 
 
 @dataclass
@@ -138,9 +154,6 @@ class LoggingConfig(ConfigClass):
 
     :param log_with: Logging backend to use (either "wandb" or "tensorboard")
     :type log_with: str
-
-    :param log_every: Number of steps between logging
-    :type log_every: int
 
     :param run_name: Name of the run
     :type run_name: str
@@ -152,10 +165,11 @@ class LoggingConfig(ConfigClass):
     :type wandb_project: str
     """
     log_with: str = "wandb" # "wandb" or "tensorboard"
-    log_every: int = 10
+    log_dir: str = None
     run_name: str = None
     wandb_entity: str = None
     wandb_project: str = None
+
 
 
 @dataclass
@@ -224,6 +238,7 @@ class ModelConfig(ConfigClass):
 class SamplerConfig(ConfigClass):
     mode : str = "v" # x, v, or eps
     guidance_scale : float = 5.0 # if guidance is being used
+    guidance_rescale : float = 0.7 # see https://arxiv.org/pdf/2305.08891.pdf
     sigma_data : float = 0.5 # Estimated sd for data
     num_inference_steps : int = 50
     eta : float = 1
@@ -278,14 +293,10 @@ class DRLXConfig(ConfigClass):
 
     :param method: Method config
     :type method: MethodConfig
-
-    :param per_prompt_stat_tracker: Config for PerPromptStatTracker (optional)
-    :type per_prompt_stat_tracker: PerPromptStatTrackerConfig
-
-    :
     """
 
     model: ModelConfig = ModelConfig()
+    sampler: SamplerConfig = SamplerConfig()
     optimizer: OptimizerConfig = OptimizerConfig()
     scheduler: SchedulerConfig = SchedulerConfig()
     train: TrainConfig = TrainConfig()
@@ -311,6 +322,7 @@ class DRLXConfig(ConfigClass):
         data = {
             "method": self.method.__dict__,
             "model": self.model.__dict__,
+            "sampler": self.sampler.__dict__,
             "optimizer": self.optimizer.__dict__,
             "scheduler": self.scheduler.__dict__,
             "train": self.train.__dict__,
@@ -327,6 +339,7 @@ class DRLXConfig(ConfigClass):
         return cls(
             method=get_method(config["method"]["name"]).from_dict(config["method"]),
             model=ModelConfig.from_dict(config["model"]),
+            sampler=SamplerConfig.from_dict(config["sampler"]),
             optimizer=OptimizerConfig.from_dict(config["optimizer"]),
             scheduler=SchedulerConfig.from_dict(config["scheduler"]),
             train=TrainConfig.from_dict(config["train"]),

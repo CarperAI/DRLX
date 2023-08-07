@@ -32,21 +32,20 @@ class AverageBlueReward(RewardModel):
     
 class JPEGCompressability(RewardModel):
     """
-    Rewards JPEG compression potential of image
+    Rewards JPEG compression potential of image (from https://arxiv.org/pdf/2305.13301.pdf)
     """
     def __init__(self, quality=10):
         super().__init__()
         self.quality = quality
 
+    def encode_jpeg(self, x, quality = 95):
+        img = Image.fromarray(x)
+        buffer = BytesIO()
+        img.save(buffer, 'JPEG', quality=quality)
+        jpeg = buffer.getvalue()
+        bytes = np.frombuffer(jpeg, dtype = np.uint8)
+        return len(bytes) / 1000
+
     def forward(self, images, prompts):
-        pixel_values = torch.from_numpy(images).permute(0, 3, 1, 2) / 255
-        batch_size = pixel_values.shape[0]
-        compressed_sizes = torch.empty(batch_size)
-
-        for i in range(batch_size):
-            image = Image.fromarray(np.uint8(pixel_values[i].permute(1, 2, 0).cpu().numpy() * 255))  # Convert to PIL image
-            buffer = BytesIO()
-            image.save(buffer, format='JPEG', quality=self.quality)  # Save image to buffer
-            compressed_sizes[i] = len(buffer.getvalue())  # Save size of compressed image
-
-        return compressed_sizes
+        scores = [-1 * self.encode_jpeg(img) for img in images]
+        return torch.tensor(scores)

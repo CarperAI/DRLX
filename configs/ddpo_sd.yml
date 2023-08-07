@@ -1,0 +1,38 @@
+method:
+  name : "DDPO"
+
+model:
+  model_path: "CompVis/stable-diffusion-v1-4"
+  model_arch_type: "LDMUnet"
+
+sampler:
+  num_inference_steps: 50
+
+optimizer:
+  name: "adamw"
+  kwargs:
+    lr: 1.0e-5
+    weight_decay: 1.0e-4
+    betas: [0.9, 0.999]
+
+scheduler:
+  name: "cosine_annealing" # Name of learning rate scheduler
+  kwargs:
+    T_max: 10000
+    eta_min: 1.412e-4
+  
+logging:
+  run_name: None
+  wandb_entity: None
+  wandb_project: None
+
+train:
+  total_samples: 5.0e+4 # 50k
+  num_samples_per_epoch: 256
+  batch_size: 2
+  target_batch: 64
+  sample_batch_size: 8
+  grad_clip: 1.0
+  checkpoint_interval: 10
+  suppress_log_keywords: "diffusers.pipelines,transformers"
+

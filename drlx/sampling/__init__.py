@@ -1,15 +1,20 @@
-from typing import Union, Iterable, Tuple, Any
+from typing import Union, Iterable, Tuple, Any, Optional
+from torchtyping import TensorType
 
 import torch
 from fastprogress import progress_bar
 from tqdm import tqdm
 import math
+import einops as eo
+
+from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion import rescale_noise_cfg
 
 from drlx.configs import SamplerConfig
 
 # Credit to Tanishq Abraham (tmabraham) for notebook from which
 # both sampler and ddpo sampler code was adapted
 
+# TODO: Normal sampler doesn't work with accelerate
 class Sampler:
     """
     Generic class for sampling generations using a denoiser. Assumes LDMUnet
@@ -17,28 +22,70 @@ class Sampler:
     def __init__(self, config : SamplerConfig = SamplerConfig()):
         self.config = config
 
-    def sample(self, use_grad = False, **kwargs):
-        if not use_grad:
-            with torch.no_grad():
-                return self._sample(**kwargs)
-        else:
-            return self._sample(**kwargs)
+        # Can't infer from denoiser when using accelerate
+        self.accelerated = False
+        self.scheduler = None
+        self.preprocess = None
+        self.noise_shape = None
 
-    def _sample(self, prompts : Iterable[str], denoiser, guidance_scale = None, num_inference_steps = None, eta = None, device = None) -> Any:
-        guidance_scale = self.config.guidance_scale
-        num_inference_steps = self.config.num_inference_steps
-        eta = self.config.eta
+    def set_denoiser_fns(self, denoiser):
+        """
+        By default, denoiser parameters relevant to sampling are found during sampling call.
+        This is not possible with accelerate so this method allows them to be set ahead of time if nessecary.
+        It also marks that accelerate is being used.
+        """
+        self.scheduler = denoiser.scheduler
+        self.preprocess = denoiser.preprocess
+        self.noise_shape = denoiser.get_input_shape()
+        self.accelerated = True
 
-        scheduler = denoiser.scheduler
+    def cfg_rescale(self, pred : TensorType["2 * b", "c", "h", "w"]):
+        """
+        Applies classifier free guidance to prediction and rescales if cfg_rescaling is enabled
+
+        :param pred:
+            Assumed to be batched repeated prediction with first half consisting of
+            unconditioned (empty token) predictions and second half being conditioned
+            predictions
+        """
+
+        pred_uncond, pred_cond = pred.chunk(2)
+        pred = pred_uncond + self.config.guidance_scale * (pred_cond - pred_uncond)
+
+        if self.config.guidance_rescale is not None:
+            pred = rescale_noise_cfg(pred, pred_cond, self.config.guidance_rescale)
         
-        text_embeds = denoiser.preprocess(prompts, mode = "embeds", device = device, num_images_per_prompt = 1, do_classifier_free_guidance=guidance_scale > 1.0).detach()
+        return pred
 
-        scheduler.set_timesteps(num_inference_steps, device = device)
-        latents = torch.randn(len(prompts), *denoiser.get_input_shape(), device = device)
+    @torch.no_grad()
+    def sample(self, prompts : Iterable[str], denoiser, device = None, show_progress : bool = False):
+        """
+        Samples latents given some prompts and a denoiser
 
-        for i, t in enumerate(progress_bar(scheduler.timesteps)):
+        :param prompts: Text prompts for image generation (to condition denoiser)
+        :param denoiser: Model to use for denoising
+        :param device: Device on which to perform model inference
+        :param show_progress: Whether to display a progress bar for the sampling steps
+
+        :return: Latents unless postprocess flag is set to true in config, in which case VAE decoded latents are returned (i.e. images)
+        """
+        if not self.accelerated:
+            self.scheduler = denoiser.scheduler
+            self.preprocess = denosier.preprocess
+            self.noise_shape = denoiser.get_input_shape()
+
+        text_embeds = self.preprocess(
+            prompts, mode = "embeds", device = device,
+            num_images_per_prompt = 1,
+            do_classifier_free_guidance = self.config.guidance_scale > 1.0
+        ).detach()
+
+        self.scheduler.set_timesteps(self.config.num_inference_steps, device = device)
+        latents = torch.randn(len(prompts), *self.noise_shape, device = device)
+
+        for i, t in enumerate(tqdm(self.scheduler.timesteps), disable = not show_progress):
             input = torch.cat([latents] * 2)
-            input = scheduler.scale_model_input(input, t)
+            input = self.scheduler.scale_model_input(input, t)
 
             pred = denoiser(
                 pixel_values=input, 
@@ -47,128 +94,180 @@ class Sampler:
             )
 
             # guidance
-            pred_uncond, pred_text = pred.chunk(2)
-            pred = pred_uncond + guidance_scale * (pred_text - pred_uncond)
-    
+            pred = self.cfg_rescale(pred)
+
             # step backward
-            scheduler_output = scheduler.step(pred, t, latents, eta, variance_noise=0)
-            t_1 = t - scheduler.config.num_train_timesteps // num_inference_steps
+            scheduler_out = scheduler.step(pred, t, latents, eta, variance_noise=0)
+            
+            # TODO: I think all this code is just for DDPO? verify
+            #t_1 = t - scheduler.config.num_train_timesteps // num_inference_steps
 
-            variance = scheduler._get_variance(t, t_1)
-            std_dev_t = eta * variance ** 0.5
-            prev_sample_mean = scheduler_output.prev_sample
-            prev_sample = prev_sample_mean + torch.randn_like(prev_sample_mean) * std_dev_t
+            #variance = self.scheduler._get_variance(t, t_1)
+            #std_dev_t = eta * variance ** 0.5
+            #prev_sample_mean = scheduler_output.prev_sample
+            #prev_sample = prev_sample_mean + torch.randn_like(prev_sample_mean) * std_dev_t
 
-            latents = prev_sample
+            latents = scheduler_out.prev_sample
 
-        if self.config.postprocess:
-            return denoiser.postprocess(latents)
-        else:
-            return latents
-
-class LDMSampler(Sampler):
-    @torch.no_grad()
-    def _sample(self, prompt, denoiser, **kwargs):
-        latents = super().sample(prompt, denoiser, **kwargs)
         if self.config.postprocess:
             return denoiser.postprocess(latents)
         else:
             return latents
 
 class DDPOSampler(Sampler):
-
-    def calc_log_probs(self, prev_sample, prev_sample_mean, std_dev_t):
-        std_dev_t = torch.clip(std_dev_t, 1e-6)
-        log_probs = -((prev_sample.detach() - prev_sample_mean) ** 2) / (2 * std_dev_t ** 2) - torch.log(std_dev_t) - math.log(math.sqrt(2 * math.pi))
-        return log_probs.mean(dim=tuple(range(1, prev_sample_mean.ndim)))
-
-    def _sample(self, prompts : Iterable[str], denoiser, device = None, show_progress : bool = False,
-     advantages = None, old_preds = None, old_log_probs = None, method_config : 'DDPOConfig' = None
-     ) -> Any:
+    def step_and_logprobs(self,
+        pred : TensorType["b", "c", "h", "w"],
+        t : float,
+        latents : TensorType["b", "c", "h", "w"],
+        old_pred : Optional[TensorType["b", "c", "h", "w"]] = None
+    ):
         """
-        Using model and prompts, sample for DDPO training. In normal state, samples final samples from prompts with denoiser.
-        Enters train mode (compute_loss is True) when all of: advantages, old_preds, old_log_probs, method_config are provided.
-        In this mode, computes loss and calls backward. Uses the method_config for hyperparameters. This is tied to the sampler
-        as sampling and loss computation are heavily related for DDPO.
+        Steps backwards using scheduler. Considers the prediction as an action sampled
+        from a normal distribution and returns average log probability for that prediction.
+        Can also be used to find probability of current model giving some other prediction (old_pred)
+
+        :param pred: Denoiser prediction with CFG and scaling accounted for
+        :param t: Timestep in diffusion process
+        :param latents: Latent vector given as input to denoiser
+        :param old_pred: Alternate prediction. If given, computes log probability of current model predicting alternative output.
         """
+        scheduler_out = self.scheduler.step(pred, t, latents, self.config.eta, variance_noise=0)
+        
+        # computing log_probs
+        t_1 = t - self.scheduler.config.num_train_timesteps // self.config.num_inference_steps
+        variance = self.scheduler._get_variance(t, t_1)
+        std_dev_t = self.config.eta * variance ** 0.5
+        prev_sample_mean = scheduler_out.prev_sample
+        prev_sample = prev_sample_mean + torch.randn_like(prev_sample_mean) * std_dev_t
 
-        # Computing loss after sampling if advantage, samples and log probabilities are provided
-        compute_loss : bool = (advantages is not None) and (old_log_probs is not None) and (old_preds is not None) and (method_config is not None)
+        std_dev_t = torch.clip(std_dev_t, 1e-6) # force sigma > 1e-6
 
-        if compute_loss:
-            advantages = advantages.to(device)
-            old_preds = old_preds.to(device)
-            old_log_probs = old_log_probs.to(device)
+        # If old_pred provided, we are finding probability of new model outputting same action as before
+        # Otherwise finding probability of current action
+        action = old_pred if old_pred is not None else prev_sample # Log prob of new model giving old output
+        log_probs = -((action.detach() - prev_sample_mean) ** 2) / (2 * std_dev_t ** 2) - torch.log(std_dev_t) - math.log(math.sqrt(2 * math.pi))
+        log_probs = eo.reduce(log_probs, 'b c h w -> b', 'mean')
 
-        scheduler = denoiser.scheduler
-        guidance_scale = self.config.guidance_scale
-        eta = self.config.eta
-        num_inference_steps = self.config.num_inference_steps
+        return prev_sample, log_probs
 
-        text_embeds = denoiser.preprocess(prompts, mode = "embeds", device = device, num_images_per_prompt = 1, do_classifier_free_guidance=guidance_scale > 1.0).detach()
+    @torch.no_grad()
+    def sample(
+        self, prompts, denoiser, device,
+        show_progress : bool = False
+    ) -> Iterable[torch.Tensor]:
+        """
+        DDPO sampling is analagous to playing a game in an RL environment. This function samples
+        given denoiser and prompts but in addition to giving latents also gives log probabilities
+        for predictions as well as ALL predictions (i.e. at each timestep)
 
-        scheduler.set_timesteps(num_inference_steps, device = device)
-        latents = torch.randn(len(prompts), *denoiser.get_input_shape(), device = device)
+        :param prompts: Text prompts to condition denoiser
+        :param denoiser: Denoising model
+        :param device: Device to do inference on
+        :param show_progress: Display progress bar?
+        
+        :return: triple of final denoised latents, all model predictions,  all log probabilities for each prediction
+        """
+        if not self.accelerated:
+            self.scheduler = denoiser.scheduler
+            self.preprocess = denosier.preprocess
+            self.noise_shape = denoiser.get_input_shape()
+
+        text_embeds = self.preprocess(
+            prompts, mode = "embeds", device = device,
+            num_images_per_prompt = 1,
+            do_classifier_free_guidance = self.config.guidance_scale > 1.0
+        ).detach()
+
+        self.scheduler.set_timesteps(self.config.num_inference_steps, device = device)
+        latents = torch.randn(len(prompts), *self.noise_shape, device = device)
 
         all_step_preds, all_log_probs = [latents], []
-        total_loss = 0.
 
-        for i, t in enumerate(tqdm(scheduler.timesteps, disable=not show_progress)):
-            if compute_loss:
-                clipped_advantages = torch.clip(advantages, -method_config.clip_advantages, method_config.clip_advantages).detach()
-            
-            input = torch.cat([old_preds[i].detach() if compute_loss else latents] * 2)
-            input = scheduler.scale_model_input(input, t)
+        for t in tqdm(self.scheduler.timesteps, disable = not show_progress):
+            latent_input = torch.cat([latents] * 2)  
+            latent_input = self.scheduler.scale_model_input(latent_input, t)
 
             pred = denoiser(
-                pixel_values=input, 
+                pixel_values = latent_input,
                 time_step = t,
                 text_embeds = text_embeds
             )
 
-            # guidance
-            pred_uncond, pred_text = pred.chunk(2)
-            pred = pred_uncond + guidance_scale * (pred_text - pred_uncond)
+            # cfg
+            pred = self.cfg_rescale(pred)
 
-            # step backward
-            scheduler_output = scheduler.step(pred, t, old_preds[i].detach() if compute_loss else latents, eta, variance_noise=0)
-            t_1 = t - scheduler.config.num_train_timesteps // num_inference_steps
+            # step
+            prev_sample, log_probs = self.step_and_logprobs(pred, t, latents)
 
-            variance = scheduler._get_variance(t, t_1)
-            std_dev_t = eta * variance ** 0.5
-            prev_sample_mean = scheduler_output.prev_sample
-            prev_sample = prev_sample_mean + torch.randn_like(prev_sample_mean) * std_dev_t
+            all_step_preds.append(prev_sample)
+            all_log_probs.append(log_probs)
+            latents = prev_sample
+        
+        return latents, torch.stack(all_step_preds), torch.stack(all_log_probs)
+    
+    def compute_loss(
+        self, prompts, denoiser, device,
+        show_progress : bool = False,
+        advantages = None, old_preds = None, old_log_probs = None,
+        method_config : 'DDPOConfig' = None,
+        accelerator = None
+    ):
+        if not self.accelerated:
+            self.scheduler = denoiser.scheduler
+            self.preprocess = denosier.preprocess
+            self.noise_shape = denoiser.get_input_shape()
 
-            # DDPO specific code
-            log_probs = self.calc_log_probs(
-                old_preds[i+1].detach() if compute_loss else prev_sample,
-                prev_sample_mean,
-                std_dev_t
+        adv_clip = method_config.clip_advantages # clip value for advantages
+        pi_clip = method_config.clip_ratio # clip value for policy ratio
+
+        text_embeds = self.preprocess(
+            prompts, mode = "embeds", device = device,
+            num_images_per_prompt = 1,
+            do_classifier_free_guidance = self.config.guidance_scale > 1.0
+        ).detach()
+
+        self.scheduler.set_timesteps(self.config.num_inference_steps, device = device)
+        latents = torch.randn(len(prompts), *self.noise_shape, device = device)
+
+        total_loss = 0.
+
+        for i, t in enumerate(tqdm(self.scheduler.timesteps, disable = not show_progress)):
+            latent_input = torch.cat([old_preds[i].detach()] * 2)
+            latent_input = self.scheduler.scale_model_input(latent_input, t)
+
+            pred = denoiser(
+                pixel_values = latent_input,
+                time_step = t,
+                text_embeds = text_embeds
             )
 
-            if compute_loss:
-                ratio = torch.exp(log_probs - old_log_probs[i].detach())
-                surr1 = -clipped_advantages * ratio
-                surr2 = -clipped_advantages *  torch.clip(ratio, 1. - method_config.clip_ratio, 1. + method_config.clip_ratio)
-                loss = torch.max(surr1, surr2).mean()
-                loss.backward()
-                total_loss += loss.item()
+            # cfg
+            pred = self.cfg_rescale(pred)
+
+            # step 
+            prev_sample, log_probs = self.step_and_logprobs(
+                pred, t, latents,
+                old_preds[i+1]
+            )
+
+            # Need to be computed and detached again because of autograd weirdness
+            clipped_advs = torch.clip(
+                advantages,
+                -adv_clip,
+                adv_clip
+            ).detach()
+
+            # ppo actor loss
+            
+            ratio = torch.exp(log_probs - old_log_probs[i].detach())
+            surr1 = -clipped_advs * ratio
+            surr2 = -clipped_advs * torch.clip(ratio, 1. - pi_clip, 1. + pi_clip)
+            loss = torch.max(surr1, surr2).mean()
+            if accelerator is not None:
+                accelerator.backward(loss)
             else:
-                all_step_preds.append(prev_sample)
-                all_log_probs.append(log_probs)
-                latents = prev_sample
-
-        if compute_loss:
-            return total_loss
-        else:
-            return latents, all_step_preds, all_log_probs
-
-
-
-
-
+                loss.backward()
+            
+            total_loss += loss.item()
         
-
-
-
-        
+        return total_loss
