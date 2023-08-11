@@ -37,7 +37,9 @@ class PickScoreModel(RewardModel):
         pixels = pixels.to(device = self.device, dtype = self.dtype)
         ids = ids.to(device = self.device)
         mask = mask.to(device = self.device)
-    
+        return pixels, ids, mask
+
+        
     @torch.no_grad() # This repo does not train the model, so in general, no_grad will be used here
     def _forward(self, pixel_values, input_ids, attention_mask):
         image_embs = self.model.get_image_features(pixel_values=pixel_values)

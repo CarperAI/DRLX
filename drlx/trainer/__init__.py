@@ -4,6 +4,8 @@ from torchtyping import TensorType
 from abc import abstractmethod
 import os
 
+import torch
+
 from drlx.configs import DRLXConfig
 from drlx.reward_modelling import RewardModel   
 from drlx.denoisers.ldm_unet import LDMUNet

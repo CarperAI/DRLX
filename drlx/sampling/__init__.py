@@ -9,7 +9,7 @@ import einops as eo
 
 from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion import rescale_noise_cfg
 
-from drlx.configs import SamplerConfig
+from drlx.configs import SamplerConfig, DDPOConfig
 
 # Credit to Tanishq Abraham (tmabraham) for notebook from which
 # both sampler and ddpo sampler code was adapted
@@ -71,7 +71,7 @@ class Sampler:
         """
         if not self.accelerated:
             self.scheduler = denoiser.scheduler
-            self.preprocess = denosier.preprocess
+            self.preprocess = denoiser.preprocess
             self.noise_shape = denoiser.get_input_shape()
 
         text_embeds = self.preprocess(
@@ -97,16 +97,7 @@ class Sampler:
             pred = self.cfg_rescale(pred)
 
             # step backward
-            scheduler_out = scheduler.step(pred, t, latents, eta, variance_noise=0)
-            
-            # TODO: I think all this code is just for DDPO? verify
-            #t_1 = t - scheduler.config.num_train_timesteps // num_inference_steps
-
-            #variance = self.scheduler._get_variance(t, t_1)
-            #std_dev_t = eta * variance ** 0.5
-            #prev_sample_mean = scheduler_output.prev_sample
-            #prev_sample = prev_sample_mean + torch.randn_like(prev_sample_mean) * std_dev_t
-
+            scheduler_out = self.scheduler.step(pred, t, latents, self.config.eta)
             latents = scheduler_out.prev_sample
 
         if self.config.postprocess:
@@ -169,7 +160,7 @@ class DDPOSampler(Sampler):
         """
         if not self.accelerated:
             self.scheduler = denoiser.scheduler
-            self.preprocess = denosier.preprocess
+            self.preprocess = denoiser.preprocess
             self.noise_shape = denoiser.get_input_shape()
 
         text_embeds = self.preprocess(
@@ -209,12 +200,12 @@ class DDPOSampler(Sampler):
         self, prompts, denoiser, device,
         show_progress : bool = False,
         advantages = None, old_preds = None, old_log_probs = None,
-        method_config : 'DDPOConfig' = None,
+        method_config : DDPOConfig = None,
         accelerator = None
     ):
         if not self.accelerated:
             self.scheduler = denoiser.scheduler
-            self.preprocess = denosier.preprocess
+            self.preprocess = denoiser.preprocess
             self.noise_shape = denoiser.get_input_shape()
 
         adv_clip = method_config.clip_advantages # clip value for advantages
