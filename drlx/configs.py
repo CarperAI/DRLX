@@ -295,13 +295,13 @@ class DRLXConfig(ConfigClass):
     :type method: MethodConfig
     """
 
-    model: ModelConfig = ModelConfig()
-    sampler: SamplerConfig = SamplerConfig()
-    optimizer: OptimizerConfig = OptimizerConfig()
-    scheduler: SchedulerConfig = SchedulerConfig()
-    train: TrainConfig = TrainConfig()
-    logging: LoggingConfig = LoggingConfig()
-    method: MethodConfig = MethodConfig()
+    model: ModelConfig
+    sampler: SamplerConfig
+    optimizer: OptimizerConfig
+    scheduler: SchedulerConfig
+    train: TrainConfig
+    logging: LoggingConfig
+    method: MethodConfig
 
     @classmethod
     def load_yaml(cls, yml_fp: str):
