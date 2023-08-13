@@ -159,7 +159,7 @@ class DDPOTrainer(BaseTrainer):
     def setup_model(self):
         model = self.get_arch(self.config)(self.config.model, sampler = DDPOSampler())
         if self.config.model.model_path is not None:
-            model.from_pretrained_pipeline(StableDiffusionPipeline, self.config.model.model_path)
+            model.from_pretrained_pipeline(StableDiffusionPipeline, self.config.model.model_path)            
         return model
 
     def loss(self, x_t, log_probs_t, advantages, prompts):
@@ -313,6 +313,12 @@ class DDPOTrainer(BaseTrainer):
                         self.optimizer.step()
                         self.scheduler.step()
                         self.optimizer.zero_grad()
+                        if self.use_wandb:
+                            self.accelerator.log({ #TODO: add approx_kl tracking
+                                "loss" : loss, 
+                                "lr" : self.scheduler.get_last_lr()[0],
+                                "epoch": epoch
+                            })
 
             # Save model every [interval] epochs
             accum += 1
