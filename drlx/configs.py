@@ -127,6 +127,9 @@ class TrainConfig(ConfigClass):
     :param seed: Random seed
     :type seed: int
 
+    :param tf32: Use tf32 precision
+    :type tf32: bool
+
     :suppress_log_keywords: List of prefixes for loggers to suppress warnings from during training. Type as single string with different prefixes delimited by commas.
     :type suppress_log_keywords: str
     """
@@ -140,6 +143,7 @@ class TrainConfig(ConfigClass):
     checkpoint_interval: int = 10
     checkpoint_path: str = "checkpoints"
     seed: int = 0
+    tf32: bool = False
     suppress_log_keywords: str = None
 
 
@@ -217,6 +221,9 @@ class ModelConfig(ConfigClass):
     :param xformers_memory_efficient: Whether to use memory efficient attention implementation from xformers
     :type xformers_memory_efficient: bool
 
+    :param gradient_checkpointing: Whether to use gradient checkpointing
+    :type gradient_checkpointing: bool
+
     :param peft_config: configuration for peft (Parameter Efficient Fine-Tuning library).
         Peft is designed to reduce the number of parameters to train and the memory footprint,
         without significant performance loss. It supports multiple techniques such as LORA
@@ -231,8 +238,9 @@ class ModelConfig(ConfigClass):
 
     model_path: str = None
     model_arch_type: str = None
-    attention_slicing: bool = False # TODO: add attention slicing support
-    xformers_memory_efficient: bool = False # TODO: add xformers support
+    attention_slicing: bool = False
+    xformers_memory_efficient: bool = False 
+    gradient_checkpointing: bool = False
     peft_config: Dict[str, Any] = field(default_factory=dict) # TODO: add PEFT support
 
 
