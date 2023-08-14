@@ -218,8 +218,6 @@ class DDPOSampler(Sampler):
         ).detach()
 
         self.scheduler.set_timesteps(self.config.num_inference_steps, device = device)
-        latents = torch.randn(len(prompts), *self.noise_shape, device = device)
-
         total_loss = 0.
 
         for i, t in enumerate(tqdm(self.scheduler.timesteps, disable = not show_progress)):
@@ -237,16 +235,12 @@ class DDPOSampler(Sampler):
 
             # step 
             prev_sample, log_probs = self.step_and_logprobs(
-                pred, t, latents,
+                pred, t, old_preds[i],
                 old_preds[i+1]
             )
 
             # Need to be computed and detached again because of autograd weirdness
-            clipped_advs = torch.clip(
-                advantages,
-                -adv_clip,
-                adv_clip
-            ).detach()
+            clipped_advs = torch.clip(advantages,-adv_clip,adv_clip).detach()
 
             # ppo actor loss
             
