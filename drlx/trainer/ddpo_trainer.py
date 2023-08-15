@@ -6,7 +6,7 @@ from collections import deque
 from drlx.configs import DRLXConfig, DDPOConfig
 from drlx.trainer import BaseTrainer
 from drlx.sampling import DDPOSampler
-from drlx.utils import suppress_warnings, Timer
+from drlx.utils import suppress_warnings, Timer, PerPromptStatTracker
 
 import torch
 import einops as eo
@@ -20,32 +20,10 @@ from PIL import Image
 
 from diffusers import StableDiffusionPipeline
 
-class PerPromptStatTracker:
-    def __init__(self, buffer_size, min_count):
-        self.buffer_size = buffer_size
-        self.min_count = min_count
-        self.stats = {}
-
-    def update(self, prompts, rewards):
-        unique = np.unique(prompts)
-        advantages = np.empty_like(rewards)
-        for prompt in unique:
-            prompt_rewards = rewards[prompts == prompt]
-            if prompt not in self.stats:
-                self.stats[prompt] = deque(maxlen=self.buffer_size)
-            self.stats[prompt].extend(prompt_rewards)
-
-            if len(self.stats[prompt]) < self.min_count:
-                mean = np.mean(rewards)
-                std = np.std(rewards) + 1e-6
-            else:
-                mean = np.mean(self.stats[prompt])
-                std = np.std(self.stats[prompt]) + 1e-6
-            advantages[prompts == prompt] = (prompt_rewards - mean) / std
-
-        return advantages
-
 class DDPOExperienceReplay(Dataset):
+    """
+    Utility class to compute advantages and create dataloader from sampling experiences.
+    """
     def __init__(self,
         reward_fn, ppst: PerPromptStatTracker,
         imgs : Iterable[Iterable], prompts : Iterable[Iterable[str]], 
@@ -53,12 +31,6 @@ class DDPOExperienceReplay(Dataset):
         log_probs : Iterable[TensorType["t", "b"]],
         **dataloader_kwargs
     ):
-        """
-        Create dataloader to use for training given input samples.
-        Inputs should still be in their original batches. Also returns
-        rewards for logging purposes.
-        """
-
         # Compute rewards first
         rewards = [reward_fn(img_batch, prompt_batch) 
                     for img_batch, prompt_batch in zip(imgs, prompts)]
@@ -75,6 +47,9 @@ class DDPOExperienceReplay(Dataset):
         self.log_probs = log_probs
         self.advantages = advantages
         self.rewards = rewards
+
+        # Prompts is list of batches of prompts (list of list of strings)
+        # Iterate through each batch and each prompt within it to unwrap into single list of prompts
         self.prompts = [prompt for prompt_list in prompts for prompt in prompt_list]
         
     def __getitem__(self, i):
