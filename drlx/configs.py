@@ -248,7 +248,7 @@ class ModelConfig(ConfigClass):
 @dataclass
 class SamplerConfig(ConfigClass):
     guidance_scale : float = 5.0 # if guidance is being used
-    guidance_rescale : float = 0.7 # see https://arxiv.org/pdf/2305.08891.pdf
+    guidance_rescale : float = None # see https://arxiv.org/pdf/2305.08891.pdf
     sigma_data : float = 0.5 # Estimated sd for data
     num_inference_steps : int = 50
     eta : float = 1
