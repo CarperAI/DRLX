@@ -1,20 +1,17 @@
 import torch
 from transformers import AutoModel, AutoProcessor
 
-from drlx.reward_modelling import RewardModel
+from drlx.reward_modelling import NNRewardModel
 
-class PickScoreModel(RewardModel):
-    def __init__(self, device = 'cpu', dtype = torch.float):
-        super().__init__()
+class PickScoreModel(NNRewardModel):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
 
         processor_path = "laion/CLIP-ViT-H-14-laion2B-s32B-b79K"
         model_path = "yuvalkirstain/PickScore_v1"
 
-        self.model = AutoModel.from_pretrained(model_path).to(device).to(dtype)
+        self.model = AutoModel.from_pretrained(model_path).to(self.device).to(self.dtype)
         self.processor = AutoProcessor.from_pretrained(processor_path)
-
-        self.device = device
-        self.dtype = dtype
 
     def preprocess(self, images, prompts):
         image_inputs = self.processor(
@@ -52,7 +49,3 @@ class PickScoreModel(RewardModel):
         scores = self.model.logit_scale.exp() * scores
 
         return scores
-    
-    @torch.no_grad()
-    def forward(self, images, prompts):
-        return self._forward(*self.preprocess(images, prompts))
