@@ -10,7 +10,12 @@ Welcome to DRLX's documentation!
    :maxdepth: 2
    :caption: Contents:
 
-
+   denoisers
+   example
+   pipeline
+   reward_modelling
+   sampling
+   trainer
 
 Indices and tables
 ==================
@@ -18,3 +23,4 @@ Indices and tables
 * :ref:`genindex`
 * :ref:`modindex`
 * :ref:`search`
+

@@ -7,7 +7,7 @@ DRLX generally uses conditioned denoisers for diffusion modelling. Currently, th
 supports any kind of conditioning signal that produces an embedding.
 
 BaseConditionalDenoiser
------------------------
+-------------------------
 
 .. automodule:: drlx.denoisers
    :members:
@@ -15,7 +15,7 @@ BaseConditionalDenoiser
    :show-inheritance:
 
 LDMUNet
--------
+----------
 
 .. automodule:: drlx.denoisers.ldm_unet
    :members:

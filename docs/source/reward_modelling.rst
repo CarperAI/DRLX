@@ -23,7 +23,7 @@ Aesthetics
    :show-inheritance:
 
 Pickscore (WIP)
----------
+----------------
 
 .. automodule:: drlx.reward_modelling.pickscore
    :members:

@@ -1,10 +1,12 @@
+.. _example: 
+
 DRLX Example
 ============
 
 This example demonstrates how to use DRLX to train a model with a custom prompt pipeline and reward model. The prompt pipeline will repeatedly provide the same prompt, "Photo of a mad scientist panda", and the reward model will reward images for having high contrast.
 
 Custom Prompt Pipeline
-----------------------
+-----------------------
 
 First, we define a custom prompt pipeline that only gives a single phrase "Photo of a mad scientist panda" over and over.
 
@@ -54,7 +56,7 @@ Next, we define a custom reward model that rewards images for having high contra
             return torch.from_numpy(contrast)
 
 Training Setup
---------------
+---------------
 
 Now, we set up the training process. We use the MadScientistPandaPrompts as the prompt pipeline and the HighContrastReward as the reward model.
 
@@ -85,11 +87,13 @@ For accelerated training, simply run the following command:
     accelerate launch -m [script]
 
 Loading the Model and Performing Inference
-------------------------------------------
+--------------------------------------------
+
 
 After training, we can load the model and perform inference with it using a default sampler.
 
 .. code-block:: python
+    
     # Load the trainer from a checkpoint
     checkpoint_path = "path/to/checkpoint"
     trainer.load_checkpoint(checkpoint_path)
