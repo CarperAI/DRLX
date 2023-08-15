@@ -126,9 +126,16 @@ def suppress_warnings(prefix : str):
         logging.getLogger(name).setLevel(logging.ERROR)
     
 class Timer:
+    """
+    Utility class for timing models
+    """
     def __init__(self):
         self.time = time.time()
-    def hit(self):
+
+    def hit(self) -> float:
+        """
+        Restarts timer and returns the time in seconds since last restart or initialization
+        """
         new_time = time.time()
         res = new_time - self.time
         self.time = new_time
@@ -150,7 +157,16 @@ def get_latest_checkpoint(checkpoint_root):
     return latest_checkpoint
 
 class PerPromptStatTracker:
-    def __init__(self, buffer_size, min_count):
+    """
+    Stat tracker to normalize rewards across prompts. If there is a sufficient number of duplicate prompts, averages across rewards given for that specific prompts. Otherwise, simply averages across all rewards.
+
+    :param buffer_size: How many prompts to consider for average
+    :type buffer_size: int
+
+    :param min_count: How many duplicates for a prompt minimum before we average over that prompt and not over all prompts
+    :type min_count: int
+    """
+    def __init__(self, buffer_size : int, min_count : int):
         self.buffer_size = buffer_size
         self.min_count = min_count
         self.stats = {}
