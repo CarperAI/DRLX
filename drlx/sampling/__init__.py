@@ -203,6 +203,25 @@ class DDPOSampler(Sampler):
         method_config : DDPOConfig = None,
         accelerator = None
     ):
+
+
+        """
+        Computes the loss for the DDPO sampling process. This function is used to train the denoiser model.
+
+        :param prompts: Text prompts to condition the denoiser
+        :param denoiser: Denoising model
+        :param device: Device to perform model inference on
+        :param show_progress: Whether to display a progress bar for the sampling steps
+        :param advantages: Normalized advantages obtained from reward computation
+        :param old_preds: Previous predictions from past model
+        :param old_log_probs: Log probabilities of predictions from past model
+        :param method_config: Configuration for the DDPO method
+        :param accelerator: Accelerator object for accelerated training (optional)
+
+        :return: Total loss computed over the sampling process
+        """
+
+
         if not self.accelerated:
             self.scheduler = denoiser.scheduler
             self.preprocess = denoiser.preprocess
