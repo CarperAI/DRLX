@@ -4,6 +4,9 @@ from pathlib import Path
 from drlx.pipeline import PromptPipeline
 
 class ImagenetAnimalPrompts(PromptPipeline):
+    """
+    Pipeline of prompts consisting of animals from ImageNet, as used in the original `DDPO paper <https://arxiv.org/abs/2305.13301>`_.
+    """
     def __init__(self, prefix='A picture of a ', postfix=', 4k unreal engine', num=10000, *args, **kwargs):
         super().__init__(*args, **kwargs)
         r = requests.get("https://raw.githubusercontent.com/formigone/tf-imagenet/master/LOC_synset_mapping.txt")

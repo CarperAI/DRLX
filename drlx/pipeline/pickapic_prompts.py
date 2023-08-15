@@ -3,6 +3,9 @@ from datasets import load_dataset
 from drlx.pipeline import PromptPipeline
 
 class PickAPicPrompts(PromptPipeline):
+    """
+    Prompt pipeline consisting of prompts from the `PickAPic dataset <https://arxiv.org/abs/2305.01569>`_ training set.
+    """
     def __init__(self, *args):
         super().__init__(*args)
 
