@@ -7,7 +7,7 @@ from tqdm import tqdm
 import math
 import einops as eo
 
-from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion import rescale_noise_cfg
+from drlx.utils import rescale_noise_cfg
 
 from drlx.configs import SamplerConfig, DDPOConfig
 

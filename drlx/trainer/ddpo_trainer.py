@@ -1,5 +1,5 @@
 from torchtyping import TensorType
-from typing import Iterable
+from typing import Iterable, Tuple, Callable
 
 from accelerate import Accelerator
 from collections import deque
@@ -24,6 +24,7 @@ class DDPOExperienceReplay(Dataset):
     """
     Utility class to compute advantages and create dataloader from sampling experiences.
     """
+
     def __init__(self,
         reward_fn, ppst: PerPromptStatTracker,
         imgs : Iterable[Iterable], prompts : Iterable[Iterable[str]], 
@@ -72,14 +73,14 @@ class DDPOExperienceReplay(Dataset):
         return DataLoader(self, collate_fn=collate, **kwargs)
     
 class DDPOTrainer(BaseTrainer):
-    def __init__(self, config : DRLXConfig):
-        """ 
-        DDPO Accelerated Trainer initilization from config. During init, sets up model, optimizer, sampler and logging
+    """ 
+    DDPO Accelerated Trainer initilization from config. During init, sets up model, optimizer, sampler and logging
 
-        :param config: DRLX config
-        :type config: DRLXConfig
-        """
-        
+    :param config: DRLX config
+    :type config: DRLXConfig
+    """
+
+    def __init__(self, config : DRLXConfig):    
         super().__init__(config)
 
         assert isinstance(self.config.method, DDPOConfig), "ERROR: Method config must be DDPO config"

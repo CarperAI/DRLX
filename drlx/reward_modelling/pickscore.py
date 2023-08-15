@@ -1,3 +1,6 @@
+from typing import Iterable
+from torchtyping import TensorType
+
 import torch
 from transformers import AutoModel, AutoProcessor
 from PIL import Image
