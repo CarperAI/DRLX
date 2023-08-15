@@ -56,16 +56,29 @@ class NNRewardModel(nn.Module):
         self.batch_size = batch_size
     
     @abstractmethod
-    def _forward(self, *inputs):
+    def _forward(self, *inputs) -> Iterable[float]:
         """
         Actual forward pass on a single batch of data
+
+        :param inputs: Arbitrary inputs to reward model
+
+        :return: Rewards across batch of inputs
+        :rtype: Iterable[float]
         """
         pass
 
     def forward(
         self,
         *inputs
-    ):
+    ) -> TensorType["batch"]:
+        """
+        Wrapper around _forward which chunks inputs based on batch size
+
+        :param inputs: Arbitrary inputs to reward model
+
+        :return Rewards across batch of inputs
+        :rtype: torch.Tensor
+        """
         inputs = [any_chunk(input, self.batch_size) for input in inputs]
         batched_inputs = zip(*inputs)
         outputs = [self._forward(*self.preprocess(*batch)) for batch in batched_inputs]
