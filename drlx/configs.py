@@ -77,9 +77,6 @@ class DDPOConfig(MethodConfig):
     :param num_inner_epochs: Number of epochs to train the policy for
     :type num_inner_epochs: int
 
-    :param sample_batch_size: Number of samples to use for each training step
-    :type sample_batch_size: int
-
     :param buffer_size: Number of samples to keep in the buffer
     :type buffer_size: int
 
@@ -88,10 +85,9 @@ class DDPOConfig(MethodConfig):
     :type min_count: int
     """
     name : str = "DDPO"
-    clip_advantages: float = 1.0
-    clip_ratio: float = 0.2
+    clip_advantages: float = 10.0
+    clip_ratio: float = 1e-4
     num_inner_epochs: int = 1
-    sample_batch_size: int = 32
 
     buffer_size: int = 32 # Set to None to avoid using per prompt stat tracker
     min_count: int = 16
@@ -131,6 +127,9 @@ class TrainConfig(ConfigClass):
     :param seed: Random seed
     :type seed: int
 
+    :param tf32: Use tf32 precision
+    :type tf32: bool
+
     :suppress_log_keywords: List of prefixes for loggers to suppress warnings from during training. Type as single string with different prefixes delimited by commas.
     :type suppress_log_keywords: str
     """
@@ -144,6 +143,7 @@ class TrainConfig(ConfigClass):
     checkpoint_interval: int = 10
     checkpoint_path: str = "checkpoints"
     seed: int = 0
+    tf32: bool = False
     suppress_log_keywords: str = None
 
 
@@ -215,6 +215,14 @@ class ModelConfig(ConfigClass):
     :param model_arch_type: Type of model architecture. 
     :type model_arch_type: str
 
+    :param attention_slicing: Whether to use attention slicing
+    :type attention_slicing: bool
+
+    :param xformers_memory_efficient: Whether to use memory efficient attention implementation from xformers
+    :type xformers_memory_efficient: bool
+
+    :param gradient_checkpointing: Whether to use gradient checkpointing
+    :type gradient_checkpointing: bool
 
     :param peft_config: configuration for peft (Parameter Efficient Fine-Tuning library).
         Peft is designed to reduce the number of parameters to train and the memory footprint,
@@ -230,15 +238,17 @@ class ModelConfig(ConfigClass):
 
     model_path: str = None
     model_arch_type: str = None
+    attention_slicing: bool = False
+    xformers_memory_efficient: bool = False 
+    gradient_checkpointing: bool = False
     peft_config: Dict[str, Any] = field(default_factory=dict) # TODO: add PEFT support
 
 
 
 @dataclass
 class SamplerConfig(ConfigClass):
-    mode : str = "v" # x, v, or eps
     guidance_scale : float = 5.0 # if guidance is being used
-    guidance_rescale : float = 0.7 # see https://arxiv.org/pdf/2305.08891.pdf
+    guidance_rescale : float = None # see https://arxiv.org/pdf/2305.08891.pdf
     sigma_data : float = 0.5 # Estimated sd for data
     num_inference_steps : int = 50
     eta : float = 1
@@ -295,13 +305,13 @@ class DRLXConfig(ConfigClass):
     :type method: MethodConfig
     """
 
-    model: ModelConfig = ModelConfig()
-    sampler: SamplerConfig = SamplerConfig()
-    optimizer: OptimizerConfig = OptimizerConfig()
-    scheduler: SchedulerConfig = SchedulerConfig()
-    train: TrainConfig = TrainConfig()
-    logging: LoggingConfig = LoggingConfig()
-    method: MethodConfig = MethodConfig()
+    model: ModelConfig
+    sampler: SamplerConfig
+    optimizer: OptimizerConfig
+    scheduler: SchedulerConfig
+    train: TrainConfig
+    logging: LoggingConfig
+    method: MethodConfig
 
     @classmethod
     def load_yaml(cls, yml_fp: str):

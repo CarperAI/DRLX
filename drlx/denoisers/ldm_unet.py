@@ -36,8 +36,11 @@ class LDMUNet(BaseConditionalDenoiser):
         Get unet from some pretrained model pipeline
         """
         pipe = cls.from_pretrained(path)
-        self.unet = pipe.unet
 
+        if self.config.attention_slicing: pipe.enable_attention_slicing()
+        if self.config.xformers_memory_efficient: pipe.enable_xformers_memory_efficient_attention()
+
+        self.unet = pipe.unet
         self.text_encoder = pipe.text_encoder
         self.vae = pipe.vae
         self.scale_factor = pipe.vae_scale_factor
@@ -48,6 +51,9 @@ class LDMUNet(BaseConditionalDenoiser):
 
         self.tokenizer = pipe.tokenizer
         self.scheduler = DDIMScheduler.from_config(pipe.scheduler.config)
+
+        if self.config.gradient_checkpointing: self.unet.enable_gradient_checkpointing()
+
         return self
     
     def preprocess(self, text : Iterable[str], mode = "text", **embed_kwargs):

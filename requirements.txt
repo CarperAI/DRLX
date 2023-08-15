@@ -1,5 +1,7 @@
 torch
 torchvision
+torchtyping
+einops
 diffusers
 transformers
 accelerate

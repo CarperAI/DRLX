@@ -67,7 +67,7 @@ class Aesthetics(RewardModel):
     """
     Reward model that rewards images with higher aesthetic score. Uses CLIP and an MLP (not put on any device by default)
     """
-    def __init__(self, quality=10, device = None):
+    def __init__(self, device = None):
         super().__init__()
         self.model = MLP(768)
         self.model.load_state_dict(load_aesthetic_model_weights())

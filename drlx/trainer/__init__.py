@@ -4,6 +4,8 @@ from torchtyping import TensorType
 from abc import abstractmethod
 import os
 
+import torch
+
 from drlx.configs import DRLXConfig
 from drlx.reward_modelling import RewardModel   
 from drlx.denoisers.ldm_unet import LDMUNet
@@ -15,6 +17,10 @@ from PIL import Image
 class BaseTrainer:
     def __init__(self, config : DRLXConfig):
         self.config = config
+
+        if self.config.train.tf32:
+            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.allow_tf32 = True
 
         # Assume these are defined in base classes
         self.optimizer = None
