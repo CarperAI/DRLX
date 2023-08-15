@@ -56,7 +56,7 @@ class LDMUNet(BaseConditionalDenoiser):
 
         return self
     
-    def preprocess(self, text : Iterable[str], mode = "text", **embed_kwargs):
+    def preprocess(self, text : Iterable[str], mode = "tokens", **embed_kwargs):
         """
         Preprocess text input, either into tokens or into embeddings.
         
