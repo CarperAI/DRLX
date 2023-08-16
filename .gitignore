@@ -1,3 +1,4 @@
 *.pth
 wandb/*
 __pycache__/
+checkpoints/
