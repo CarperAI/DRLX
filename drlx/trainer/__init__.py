@@ -15,6 +15,9 @@ from drlx.utils import get_optimizer_class, get_scheduler_class, get_diffusion_p
 from PIL import Image
 
 class BaseTrainer:
+    """
+    Base class for any DRLX trainer
+    """
     def __init__(self, config : DRLXConfig):
         self.config = config
 
@@ -47,6 +50,9 @@ class BaseTrainer:
         return scheduler
 
     def get_arch(self, config):
+        """
+        Get model class from arch_name in config file. Currently only supports LDMUNet
+        """
         model_name = LDMUNet # nothing else is supported for now (TODO: add support for other models)
         return model_name
 
@@ -61,6 +67,18 @@ class BaseTrainer:
         pass
 
     def save_checkpoint(self, fp : str, components : Dict[str, Any], index : int = None):
+        """
+        Basic checkpoint saving for any derived trainer to use
+
+        :param fp: Path to save checkpoint to
+        :type fp: str
+
+        :param components: Dictionary of all components to save (i.e. model, optimizer, scheduler, etc.)
+        :type components: Dict
+
+        :param index: When provided, uses fp as a root folder and puts checkpoint under a subdirectory that is named numerically with index
+        :type index: Optional[int]
+        """
         if not os.path.exists(fp):
             os.makedirs(fp)
 
@@ -73,6 +91,18 @@ class BaseTrainer:
             torch.save(component, os.path.join(fp, f"{key}.pt"))
 
     def load_checkpoint(self, fp: str, index: int = None) -> Dict[str, Any]:
+        """
+        Basic checkpoint loading for derived trainers to use.
+
+        :param fp: Path to load checkpoint from
+        :type fp: str
+
+        :param index: When provided, uses fp as root and loads subdirectory with numerical name given by index
+        :type index: Optional[int]
+
+        :return: Dictionary of components and their states
+        :rtype: Dict
+        """
         # If an index is given, update the file path to include the subdirectory with the index as its name
         if index is not None:
             fp = os.path.join(fp, str(index))

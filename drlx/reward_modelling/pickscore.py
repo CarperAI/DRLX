@@ -1,22 +1,29 @@
+from typing import Iterable
+from torchtyping import TensorType
+
 import torch
 from transformers import AutoModel, AutoProcessor
+from PIL import Image
 
-from drlx.reward_modelling import RewardModel
+from drlx.reward_modelling import NNRewardModel
 
-class PickScoreModel(RewardModel):
-    def __init__(self, device = 'cpu', dtype = torch.float):
-        super().__init__()
+class PickScoreModel(NNRewardModel):
+    """
+    Reward model using PickScore model from PickAPic
+    """
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
 
         processor_path = "laion/CLIP-ViT-H-14-laion2B-s32B-b79K"
         model_path = "yuvalkirstain/PickScore_v1"
 
-        self.model = AutoModel.from_pretrained(model_path).to(device).to(dtype)
+        self.model = AutoModel.from_pretrained(model_path).to(self.device).to(self.dtype)
         self.processor = AutoProcessor.from_pretrained(processor_path)
 
-        self.device = device
-        self.dtype = dtype
-
-    def preprocess(self, images, prompts):
+    def preprocess(self, images : Iterable[Image.Image], prompts : Iterable[str]):
+        """
+        Preprocess images and prompts into tensors, making sure to move to correct device and data type
+        """
         image_inputs = self.processor(
             images=images,
             padding=True,
@@ -41,7 +48,12 @@ class PickScoreModel(RewardModel):
 
         
     @torch.no_grad() # This repo does not train the model, so in general, no_grad will be used here
-    def _forward(self, pixel_values, input_ids, attention_mask):
+    def _forward(
+        self,
+        pixel_values : TensorType["batch", "channels", "height", "width"],
+        input_ids : TensorType["batch", "sequence"],
+        attention_mask : TensorType["batch", "sequence"]
+    ) -> TensorType["batch"]:
         image_embs = self.model.get_image_features(pixel_values=pixel_values)
         image_embs /= image_embs.norm(dim=-1, keepdim=True)
 
@@ -52,7 +64,3 @@ class PickScoreModel(RewardModel):
         scores = self.model.logit_scale.exp() * scores
 
         return scores
-    
-    @torch.no_grad()
-    def forward(self, images, prompts):
-        return self._forward(*self.preprocess(images, prompts))

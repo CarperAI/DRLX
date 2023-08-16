@@ -1,12 +1,12 @@
 from torchtyping import TensorType
-from typing import Iterable
+from typing import Iterable, Tuple, Callable
 
 from accelerate import Accelerator
 from collections import deque
 from drlx.configs import DRLXConfig, DDPOConfig
 from drlx.trainer import BaseTrainer
 from drlx.sampling import DDPOSampler
-from drlx.utils import suppress_warnings, Timer
+from drlx.utils import suppress_warnings, Timer, PerPromptStatTracker
 
 import torch
 import einops as eo
@@ -20,32 +20,11 @@ from PIL import Image
 
 from diffusers import StableDiffusionPipeline
 
-class PerPromptStatTracker:
-    def __init__(self, buffer_size, min_count):
-        self.buffer_size = buffer_size
-        self.min_count = min_count
-        self.stats = {}
-
-    def update(self, prompts, rewards):
-        unique = np.unique(prompts)
-        advantages = np.empty_like(rewards)
-        for prompt in unique:
-            prompt_rewards = rewards[prompts == prompt]
-            if prompt not in self.stats:
-                self.stats[prompt] = deque(maxlen=self.buffer_size)
-            self.stats[prompt].extend(prompt_rewards)
-
-            if len(self.stats[prompt]) < self.min_count:
-                mean = np.mean(rewards)
-                std = np.std(rewards) + 1e-6
-            else:
-                mean = np.mean(self.stats[prompt])
-                std = np.std(self.stats[prompt]) + 1e-6
-            advantages[prompts == prompt] = (prompt_rewards - mean) / std
-
-        return advantages
-
 class DDPOExperienceReplay(Dataset):
+    """
+    Utility class to compute advantages and create dataloader from sampling experiences.
+    """
+
     def __init__(self,
         reward_fn: callable, 
         ppst: PerPromptStatTracker,
@@ -55,12 +34,6 @@ class DDPOExperienceReplay(Dataset):
         log_probs : Iterable[TensorType["t", "b"]],
         **dataloader_kwargs
     ):
-        """
-        Create dataloader to use for training given input samples.
-        Inputs should still be in their original batches. Also returns
-        rewards for logging purposes.
-        """
-
         # Compute rewards first
         rewards = [reward_fn(img_batch, prompt_batch) 
                     for img_batch, prompt_batch in zip(imgs, prompts)]
@@ -77,6 +50,9 @@ class DDPOExperienceReplay(Dataset):
         self.log_probs = log_probs
         self.advantages = advantages
         self.rewards = rewards
+
+        # Prompts is list of batches of prompts (list of list of strings)
+        # Iterate through each batch and each prompt within it to unwrap into single list of prompts
         self.prompts = [prompt for prompt_list in prompts for prompt in prompt_list]
         
     def __getitem__(self, i):
@@ -99,11 +75,14 @@ class DDPOExperienceReplay(Dataset):
         return DataLoader(self, collate_fn=collate, **kwargs)
     
 class DDPOTrainer(BaseTrainer):
-    def __init__(self, config : DRLXConfig):
-        """ 
-        DDPO Accelerate Trainer initialization
-        """
-        
+    """ 
+    DDPO Accelerated Trainer initilization from config. During init, sets up model, optimizer, sampler and logging
+
+    :param config: DRLX config
+    :type config: DRLXConfig
+    """
+
+    def __init__(self, config : DRLXConfig):    
         super().__init__(config)
 
         assert isinstance(self.config.method, DDPOConfig), "ERROR: Method config must be DDPO config"
@@ -159,12 +138,39 @@ class DDPOTrainer(BaseTrainer):
         self.world_size = self.accelerator.state.num_processes
 
     def setup_model(self):
-        model = self.get_arch(self.config)(self.config.model, sampler = DDPOSampler())
+        """
+        Set up model from config.
+        """
+        model = self.get_arch(self.config)(self.config.model, sampler = DDPOSampler(self.config.sampler))
         if self.config.model.model_path is not None:
             model.from_pretrained_pipeline(StableDiffusionPipeline, self.config.model.model_path)            
         return model
 
-    def loss(self, x_t, log_probs_t, advantages, prompts):
+    def loss(
+        self,
+        x_t : TensorType["timesteps", "batch", "channels", "height", "width"],
+        log_probs_t : TensorType["timesteps", "batch"], 
+        advantages : TensorType["batch"],
+        prompts : Iterable[str]
+    ):
+        """
+        Get loss for training
+
+        :param x_t: Samples across time steps and across batch
+        :type x_t: torch.Tensor
+
+        :param log_probs_t: Log probabilities for each sample prediction
+        :type log_probs_t: torch.Tensor
+
+        :advantages: Advantages associated with each image across batch
+        :type advantages: torch.Tensor
+
+        :prompts: Prompts used for generation across the batch
+        :type prompts: Iterable[str]
+
+        :return: loss
+        :rtype: torch.Tensor
+        """
         return self.sampler.compute_loss(
             prompts=prompts,
             denoiser=self.model,
@@ -177,7 +183,16 @@ class DDPOTrainer(BaseTrainer):
             accelerator=self.accelerator
         )
     
-    def sample(self, prompts):
+    def sample(self, prompts : Iterable[str]) -> Tuple[torch.Tensor]:
+        """
+        Sample predictions, predictions at time steps and log probabilities from sampler
+
+        :param prompts: Batched prompts to use for sampling
+        :type prompts: Iterable[str]
+
+        :return: 3 Tensors: final predictions for latent, all step predictions during denoising process, and log probabilities for each prediction
+        :rtype: Tuple[torch.Tensor]
+        """
         preds, all_preds, log_probs = self.sampler.sample(
             prompts = prompts,
             denoiser = self.model,
@@ -186,12 +201,18 @@ class DDPOTrainer(BaseTrainer):
 
         return preds, all_preds, log_probs
 
-    def sample_and_calculate_rewards(self, prompts, reward_fn):
+    def sample_and_calculate_rewards(self, prompts : Iterable[str], reward_fn : Callable) -> Tuple:
         """
         Samples a batch of images and calculates the rewards for each image
 
-        Args:
-            prompts (list[str]): The prompts to sample with
+        :param prompts: Batch of prompts to sample with
+        :type prompts: Iterable[str]
+
+        :param reward_fn: Function to be called on final images and prompts to be used for reward computation
+        :type reward_fn: Callable[[np.ndarray, Iterable[str]], Iterable[float]]
+
+        :return: Final images, rewards, all step predictions, log probabilities for predictions
+        :rtype: Tuple
         """
 
         preds, all_preds, log_probs = self.sample(prompts)
@@ -201,6 +222,9 @@ class DDPOTrainer(BaseTrainer):
         return imgs, rewards, all_preds, log_probs
     
     def print_in_main(self, txt):
+        """
+        Utility function to use with accelerate so that messages are only printed once in main process
+        """
         if self.accelerator.is_main_process:
             print(txt)
     
@@ -335,12 +359,22 @@ class DDPOTrainer(BaseTrainer):
             
             del loss, experience_loader
 
-    def save_checkpoint(self, fp, components = None):
+    def save_checkpoint(self, fp : str, components = None):
+        """
+        Save checkpoint in main process
+
+        :param fp: File path to save checkpoint to
+        """
         if self.accelerator.is_main_process:
             self.accelerator.save_state(output_dir=fp)
         self.accelerator.wait_for_everyone()
         
 
-    def load_checkpoint(self, fp):
+    def load_checkpoint(self, fp : str):
+        """
+        Load checkpoint
+
+        :param fp: File path to checkpoint to load from
+        """
         self.accelerator.load_state(fp)
         self.print_in_main("Succesfully loaded checkpoint")
