@@ -126,9 +126,16 @@ def suppress_warnings(prefix : str):
         logging.getLogger(name).setLevel(logging.ERROR)
     
 class Timer:
+    """
+    Utility class for timing models
+    """
     def __init__(self):
         self.time = time.time()
-    def hit(self):
+
+    def hit(self) -> float:
+        """
+        Restarts timer and returns the time in seconds since last restart or initialization
+        """
         new_time = time.time()
         res = new_time - self.time
         self.time = new_time
@@ -148,3 +155,50 @@ def get_latest_checkpoint(checkpoint_root):
     # Find the maximum directory number (assuming all subdirectories are numeric)
     latest_checkpoint = max(subdirs, key=lambda s: int(os.path.basename(s)))
     return latest_checkpoint
+
+class PerPromptStatTracker:
+    """
+    Stat tracker to normalize rewards across prompts. If there is a sufficient number of duplicate prompts, averages across rewards given for that specific prompts. Otherwise, simply averages across all rewards.
+
+    :param buffer_size: How many prompts to consider for average
+    :type buffer_size: int
+
+    :param min_count: How many duplicates for a prompt minimum before we average over that prompt and not over all prompts
+    :type min_count: int
+    """
+    def __init__(self, buffer_size : int, min_count : int):
+        self.buffer_size = buffer_size
+        self.min_count = min_count
+        self.stats = {}
+
+    def update(self, prompts, rewards):
+        unique = np.unique(prompts)
+        advantages = np.empty_like(rewards)
+        for prompt in unique:
+            prompt_rewards = rewards[prompts == prompt]
+            if prompt not in self.stats:
+                self.stats[prompt] = deque(maxlen=self.buffer_size)
+            self.stats[prompt].extend(prompt_rewards)
+
+            if len(self.stats[prompt]) < self.min_count:
+                mean = np.mean(rewards)
+                std = np.std(rewards) + 1e-6
+            else:
+                mean = np.mean(self.stats[prompt])
+                std = np.std(self.stats[prompt]) + 1e-6
+            advantages[prompts == prompt] = (prompt_rewards - mean) / std
+
+        return advantages
+
+def rescale_noise_cfg(noise_cfg, noise_pred_text, guidance_rescale=0.0):
+    """
+    From [diffusers repository](https://github.com/huggingface/diffusers/blob/a7508a76f025fcbe104c28f73dd17c8e866f655b/src/diffusers/pipelines/stable_diffusion/pipeline_stable_diffusion.py#L58).
+    Copied here due to import errors when attempting to import from package
+    """
+    std_text = noise_pred_text.std(dim=list(range(1, noise_pred_text.ndim)), keepdim=True)
+    std_cfg = noise_cfg.std(dim=list(range(1, noise_cfg.ndim)), keepdim=True)
+    # rescale the results from guidance (fixes overexposure)
+    noise_pred_rescaled = noise_cfg * (std_text / std_cfg)
+    # mix with the original results from guidance by factor guidance_rescale to avoid "plain looking" images
+    noise_cfg = guidance_rescale * noise_pred_rescaled + (1 - guidance_rescale) * noise_cfg
+    return noise_cfg

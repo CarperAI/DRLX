@@ -1,5 +1,5 @@
 from torchtyping import TensorType
-from typing import Iterable, Union, Callable
+from typing import Iterable, Union, Callable, Type, Tuple
 
 import torch
 import numpy as np
@@ -10,6 +10,18 @@ from drlx.configs import ModelConfig, SamplerConfig
 from drlx.sampling import Sampler
 
 class LDMUNet(BaseConditionalDenoiser):
+    """
+    Class for Latent Diffusion Model UNet denoiser. Can optionally pass sampler information, though it is not required. Generally used in tandem with a diffusers pipeline.
+
+    :param config: Configuration for model
+    :type config: ModelConfig
+
+    :param sampler_config: Configuration for sampler (optional). If provided, will create a default sampler.
+    :type sampler_config: SamplerConfig
+
+    :param sampler: Can be provided as alternative to sampler_config (also optional). If neither are provided, a default sampler will be used.
+    :type sampler: Sampler
+    """
     def __init__(self, config : ModelConfig, sampler_config : SamplerConfig = None, sampler : Sampler = None):
         super().__init__(config, sampler_config, sampler)
 
@@ -23,7 +35,13 @@ class LDMUNet(BaseConditionalDenoiser):
 
         self.scale_factor = None
 
-    def get_input_shape(self):
+    def get_input_shape(self) -> Tuple[int]:
+        """
+        Figure out latent noise input shape for the UNet. Requires that unet and vae are defined
+
+        :return: Input shape as a tuple
+        :rtype: Tuple[int]
+        """
         assert self.unet and self.vae, "Cannot get input shape if model not initialized"
 
         in_channels = self.unet.config.in_channels
@@ -31,9 +49,18 @@ class LDMUNet(BaseConditionalDenoiser):
 
         return (in_channels, sample_size, sample_size)
     
-    def from_pretrained_pipeline(self, cls, path):
+    def from_pretrained_pipeline(self, cls : Type, path : str):
         """
         Get unet from some pretrained model pipeline
+
+        :param cls: Class to use for pipeline (i.e. StableDiffusionPipeline)
+        :type cls: Type
+
+        :param path: Path to pretrained pipeline
+        :type path: str
+
+        :return: an LDMUNet object with UNet, Text Encoder, VAE, tokenizer and scheduler from pretrained pipeline
+        :rtype: LDMUNet
         """
         pipe = cls.from_pretrained(path)
 
@@ -84,8 +111,11 @@ class LDMUNet(BaseConditionalDenoiser):
         else: 
             raise ValueError("Invalid mode specified for preprocessing")
 
-    @torch.no_grad() # TODO: device placement should be using accelerate
+    @torch.no_grad()
     def postprocess(self, output : TensorType["batch", "channels", "height", "width"], vae_device = None):
+        """
+        Post process 
+        """
         if vae_device is not None:
             self.vae = self.vae.to(vae_device)
             output = output.to(vae_device)

@@ -1,3 +1,5 @@
+from typing import Iterable
+
 import torch
 from torch import nn
 import numpy as np
@@ -35,6 +37,12 @@ class MLP(nn.Module):
         return self.layers(x)
 
 def load_aesthetic_model_weights(cache="."):
+    """
+    Load aesthetic model weights
+
+    :param cache: Stores the downloaded weights here
+    :type cache: str
+    """
     weights_fname = "sac+logos+ava1-l14-linearMSE.pth"
     loadpath = os.path.join(cache, weights_fname)
 
@@ -52,6 +60,9 @@ def load_aesthetic_model_weights(cache="."):
     return weights
 
 def aesthetic_model_normalize(a, axis=-1, order=2):
+    """
+    Normalize output from aesthetics model
+    """
     l2 = np.atleast_1d(np.linalg.norm(a, order, axis))
     l2[l2 == 0] = 1
     return a / np.expand_dims(l2, axis)
@@ -66,6 +77,9 @@ def aesthetic_scoring(imgs, preprocess, clip_model, aesthetic_model):
 class Aesthetics(RewardModel):
     """
     Reward model that rewards images with higher aesthetic score. Uses CLIP and an MLP (not put on any device by default)
+
+    :param device: Device to load model on
+    :type device: torch.device
     """
     def __init__(self, device = None):
         super().__init__()
@@ -76,7 +90,7 @@ class Aesthetics(RewardModel):
         if device is not None:
             self.model.to(device)
 
-    def forward(self, images, prompts):
+    def forward(self, images : np.ndarray, prompts : Iterable[str]):
         return aesthetic_scoring(
             images,
             self.preprocess,

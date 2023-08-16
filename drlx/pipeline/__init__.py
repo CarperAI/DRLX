@@ -8,9 +8,9 @@ from torch.utils.data import DataLoader, Dataset
 
 class Pipeline(Dataset):
     """
-    Pipeline to use for data whe training some RL model
+    Pipeline for data during RL training. Subclasses should define some dataset with getitem and len methods.
 
-    :param prep_fn: Function that will be called on iterable of data elements from the pipeline. Typically takes a list of prompts and tokenizes them. Often should just be set to a models preprocessing function.
+    :param prep_fn: Function that will be called on iterable of data elements from the pipeline. Not always required, and by default is simply an identity function.
     :type prep_fn: Callable
     """
     def __init__(self, prep_fn : Callable = None):
@@ -21,16 +21,32 @@ class Pipeline(Dataset):
         else:
             self.prep = prep_fn
 
+    @abstractmethod
+    def __getitem__(self, index):
+        pass
+    
+    @abstractmethod
+    def __len__(self):
+        pass
+
     def create_train_loader(self, **kwargs) -> DataLoader:
-        # By default just create_loader
+        """
+        Create loader for training data. Default behaviour is to just call create_loader (i.e. assumes there is no split)
+        """
         return self.create_loader(**kwargs)
 
     @abstractmethod
     def create_val_loader(self, **kwargs) -> DataLoader:
+        """
+        Create validation loader.
+        """
         pass
 
     @classmethod
     def make_default_collate(self, prep : Callable):
+        """
+        Creates a default collate function for the dataloader that assumes dataset elements are tuples of images and strings.
+        """
         def collate(batch : Iterable[Tuple[Image.Image, str]]):
             img_batch = [d[0] for d in batch]
             txt_batch = [d[1] for d in batch]
@@ -40,6 +56,14 @@ class Pipeline(Dataset):
         return collate
 
     def create_loader(self, **kwargs) -> DataLoader:
+        """
+        Create dataloader over self. Assumes __getitem__ and __len__ are implemented.
+
+        :param kwargs: Keyword arguments for the created pytorch dataloader
+
+        :return: Dataloader for dataset within pipeline
+        :rtype: DataLoader
+        """
         if self.prep is None:
             raise ValueError("Preprocessing function must be set before creating a dataloader.")
 
@@ -50,11 +74,14 @@ class Pipeline(Dataset):
 
 class PromptPipeline(Pipeline):
     """
-    Base class for a pipeline that provides text prompts.
+    Base class for a pipeline that provides text prompts only.
     """
 
     @classmethod
     def make_default_collate(self, prep : Callable):
+        """
+        Default collate for a prompt pipeline which assumes the dataset elements are simply strings.
+        """
         def collate(batch : Iterable[str]):
             return prep(batch)
 
