@@ -47,8 +47,10 @@ class PerPromptStatTracker:
 
 class DDPOExperienceReplay(Dataset):
     def __init__(self,
-        reward_fn, ppst: PerPromptStatTracker,
-        imgs : Iterable[Iterable], prompts : Iterable[Iterable[str]], 
+        reward_fn: callable, 
+        ppst: PerPromptStatTracker,
+        imgs : Iterable[Iterable], 
+        prompts : Iterable[Iterable[str]], 
         all_step_preds : Iterable[TensorType["t","b","c","h","w"]],
         log_probs : Iterable[TensorType["t", "b"]],
         **dataloader_kwargs
@@ -251,7 +253,7 @@ class DDPOTrainer(BaseTrainer):
             # Make a new dataloader to reshuffle data
             dataloader = self.accelerator.prepare(
                 prompt_pipeline.create_train_loader(batch_size = self.config.train.sample_batch_size, shuffle = True)
-            )
+            ) # TODO: check if this breaks things
 
             # Sample (play the game)
             data_steps = self.config.train.num_samples_per_epoch // self.config.train.sample_batch_size // self.world_size
@@ -322,8 +324,7 @@ class DDPOTrainer(BaseTrainer):
 
             # Save model every [interval] epochs
             accum += 1
-            if accum % self.config.train.checkpoint_interval == 0 \
-            and self.config.train.checkpoint_interval > 0:
+            if accum % self.config.train.checkpoint_interval == 0 and self.config.train.checkpoint_interval > 0:
                 self.print_in_main("Saving...")
                 base_path = f"checkpoints/{self.config.logging.run_name}"
                 if not os.path.exists(base_path) and self.accelerator.is_main_process:
