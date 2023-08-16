@@ -2,7 +2,6 @@ from torchtyping import TensorType
 from typing import Iterable, Tuple, Callable
 
 from accelerate import Accelerator
-from collections import deque
 from drlx.configs import DRLXConfig, DDPOConfig
 from drlx.trainer import BaseTrainer
 from drlx.sampling import DDPOSampler
@@ -88,10 +87,10 @@ class DDPOTrainer(BaseTrainer):
         assert isinstance(self.config.method, DDPOConfig), "ERROR: Method config must be DDPO config"
 
         # Figure out batch size and accumulation steps
-        self.accum_steps = self.config.sampler.num_inference_steps
         if self.config.train.target_batch is not None: # Just use normal batch_size
-            self.accum_steps *= (self.config.train.target_batch // self.config.train.batch_size)
-            
+            self.accum_steps = (self.config.train.target_batch // self.config.train.batch_size)
+        else:
+            self.accum_steps = 1
 
         self.accelerator = Accelerator(
             log_with = config.logging.log_with,
@@ -277,8 +276,7 @@ class DDPOTrainer(BaseTrainer):
             # Make a new dataloader to reshuffle data
             dataloader = self.accelerator.prepare(
                 prompt_pipeline.create_train_loader(batch_size = self.config.train.sample_batch_size, shuffle = True)
-            ) # TODO: check if this breaks things
-
+                )
             # Sample (play the game)
             data_steps = self.config.train.num_samples_per_epoch // self.config.train.sample_batch_size // self.world_size
             self.print_in_main("Sampling...")
@@ -333,7 +331,7 @@ class DDPOTrainer(BaseTrainer):
                 disable=(not self.accelerator.is_main_process) or (self.config.method.num_inner_epochs == 1)
             ):
                 for (all_step_preds, log_probs, advantages, prompts) in tqdm(experience_loader, disable=not self.accelerator.is_main_process):
-                    with self.accelerator.accumulate(self.model): # Accumulate across time steps and minibatches
+                    with self.accelerator.accumulate(self.model): # Accumulate across minibatches
                         loss = self.loss(all_step_preds, log_probs, advantages, prompts)
                         self.accelerator.clip_grad_norm_(self.model.parameters(), self.config.train.grad_clip)
                         self.optimizer.step()

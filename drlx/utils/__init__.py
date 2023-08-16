@@ -3,27 +3,14 @@ import glob
 from enum import Enum
 from itertools import repeat
 from typing import Any, Dict, Iterable, Tuple
-
+from collections import deque
 import torch
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR
 from diffusers import StableDiffusionPipeline
 import logging
 import time
 
-#TODO: is this needed?
-def infinite_dataloader(dataloader: Iterable, sampler=None) -> Iterable:
-    """
-    Returns a cyclic infinite dataloader from a finite dataloader
-    """
-    epoch = 0
-    for _ in repeat(dataloader):
-        if sampler is not None:
-            sampler.set_epoch(epoch)
-        epoch += 1
-
-        yield from dataloader
-
-
+import numpy as np
 
 class OptimizerName(str, Enum):
     """Supported optimizer names"""

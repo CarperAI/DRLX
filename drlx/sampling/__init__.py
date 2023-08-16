@@ -2,7 +2,6 @@ from typing import Union, Iterable, Tuple, Any, Optional
 from torchtyping import TensorType
 
 import torch
-from fastprogress import progress_bar
 from tqdm import tqdm
 import math
 import einops as eo

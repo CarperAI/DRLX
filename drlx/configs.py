@@ -134,10 +134,10 @@ class TrainConfig(ConfigClass):
     :type suppress_log_keywords: str
     """
     batch_size: int = 4
-    target_batch: int = 64
+    target_batch: int = None
     sample_batch_size: int = 8
     num_epochs: int = 50
-    total_samples: int = 5e+4
+    total_samples: int = None
     num_samples_per_epoch: int = 256
     grad_clip: float = 1.0
     checkpoint_interval: int = 10
@@ -166,7 +166,7 @@ class LoggingConfig(ConfigClass):
     """
     log_with: str = "wandb" # "wandb" or "tensorboard"
     log_dir: str = None
-    run_name: str = None
+    run_name: str = 'ddpo_exp'
     wandb_entity: str = None
     wandb_project: str = None
 
@@ -249,7 +249,6 @@ class ModelConfig(ConfigClass):
 class SamplerConfig(ConfigClass):
     guidance_scale : float = 5.0 # if guidance is being used
     guidance_rescale : float = None # see https://arxiv.org/pdf/2305.08891.pdf
-    sigma_data : float = 0.5 # Estimated sd for data
     num_inference_steps : int = 50
     eta : float = 1
     postprocess : bool = False # If true, post processes latents to images (uint8 np arrays)
