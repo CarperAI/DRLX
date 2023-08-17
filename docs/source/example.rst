@@ -103,6 +103,7 @@ After training, we can load the model and perform inference with it using a defa
 
     # Initialize a default Sampler
     sampler = Sampler()
+    sampler.config.postprocess = True
 
     # Sample for the panda prompt
     panda_prompt = ["Photo of a mad scientist panda"]
