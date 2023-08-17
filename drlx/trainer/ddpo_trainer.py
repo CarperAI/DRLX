@@ -10,6 +10,7 @@ from drlx.utils import suppress_warnings, Timer, PerPromptStatTracker
 import torch
 import einops as eo
 import os
+import gc
 import logging
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
@@ -356,7 +357,8 @@ class DDPOTrainer(BaseTrainer):
             last_epoch_time = time_per_1k(self.config.train.num_samples_per_epoch)
             
             del loss, experience_loader
-
+            gc.collect()
+            torch.cuda.empty_cache()
     def save_checkpoint(self, fp : str, components = None):
         """
         Save checkpoint in main process
