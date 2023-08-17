@@ -96,7 +96,7 @@ class DDPOTrainer(BaseTrainer):
         self.accelerator = Accelerator(
             log_with = config.logging.log_with,
             gradient_accumulation_steps = self.accum_steps
-        ) # TODO: Add accelerator args
+        )
 
         # Disable tokenizer warnings since they clutter the CLI
         kw_str = self.config.train.suppress_log_keywords
@@ -104,15 +104,11 @@ class DDPOTrainer(BaseTrainer):
             for prefix in kw_str.split(","):
                 suppress_warnings(prefix.strip())
 
-        
         self.model = self.setup_model()
         self.optimizer = self.setup_optimizer()
         self.scheduler = self.setup_scheduler()
 
-        # Disentangle this for accelerated training to work
         self.sampler = self.model.sampler
-        self.sampler.set_denoiser_fns(self.model) 
-
         self.model, self.optimizer, self.scheduler = self.accelerator.prepare(
             self.model, self.optimizer, self.scheduler
         )
@@ -196,7 +192,8 @@ class DDPOTrainer(BaseTrainer):
         preds, all_preds, log_probs = self.sampler.sample(
             prompts = prompts,
             denoiser = self.model,
-            device = self.accelerator.device
+            device = self.accelerator.device,
+            accelerator = self.accelerator
         )
 
         return preds, all_preds, log_probs
@@ -216,7 +213,7 @@ class DDPOTrainer(BaseTrainer):
         """
 
         preds, all_preds, log_probs = self.sample(prompts)
-        imgs = self.model.postprocess(preds)
+        imgs = self.accelerator.unwrap_model(self.model).postprocess(preds)
 
         rewards = reward_fn(imgs, prompts).to(self.accelerator.device)
         return imgs, rewards, all_preds, log_probs
@@ -294,8 +291,8 @@ class DDPOTrainer(BaseTrainer):
 
             # Get rewards from experiences
             self.accelerator.wait_for_everyone()
-            self.model = self.accelerator.unwrap_model(self.model)
-            imgs = [self.model.postprocess(pred) for pred in preds]
+            unwrapped_model = self.accelerator.unwrap_model(self.model)
+            imgs = [unwrapped_model.postprocess(pred) for pred in preds]
 
             # Experience replay computes normalized rewards,
             # then is used to create a loader for training
@@ -326,7 +323,7 @@ class DDPOTrainer(BaseTrainer):
 
             # Inner epochs and actual training
             self.print_in_main("Training...")
-            self.model, experience_loader = self.accelerator.prepare(self.model, experience_loader)
+            experience_loader = self.accelerator.prepare(experience_loader)
             # Inner epochs normally one, disable progress bar when this is the case 
             for inner_epoch in tqdm(range(self.config.method.num_inner_epochs),
                 disable=(not self.accelerator.is_main_process) or (self.config.method.num_inner_epochs == 1)
@@ -365,9 +362,9 @@ class DDPOTrainer(BaseTrainer):
 
         :param fp: File path to save checkpoint to
         """
+        self.accelerator.wait_for_everyone()
         if self.accelerator.is_main_process:
             self.accelerator.save_state(output_dir=fp)
-        self.accelerator.wait_for_everyone()
         
 
     def load_checkpoint(self, fp : str):
