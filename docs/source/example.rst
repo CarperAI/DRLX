@@ -18,9 +18,6 @@ First, we define a custom prompt pipeline that only gives a single phrase "Photo
         """
         Custom prompt pipeline that only gives a single phrase "Photo of a mad scientist panda" over and over.
         """
-        def __init__(self, *args):
-            super().__init__(*args)
-
         def __getitem__(self, index):
             return "Photo of a mad scientist panda"
         
@@ -42,9 +39,6 @@ Next, we define a custom reward model that rewards images for having high contra
         """
         Rewards high contrast in the image.
         """
-        def __init__(self):
-            super().__init__()
-
         def forward(self, images, prompts):
             # If the input is a list of PIL Images, convert to numpy array
             if isinstance(images, list):
@@ -89,27 +83,22 @@ For accelerated training, simply run the following command:
 Loading the Model and Performing Inference
 --------------------------------------------
 
-
 After training, we can load the model and perform inference with it using a default sampler.
 
 .. code-block:: python
     
-    # Load the trainer from a checkpoint
-    checkpoint_path = "path/to/checkpoint"
+    # Load the trainer from a checkpoint if you wanted to resume training
+    # Trainer by default saves both output and checkpoint in seperate folders specified by run_name
+    checkpoint_path = "checkpoints/run_name"
+    output_path = "output/run_name"
     trainer.load_checkpoint(checkpoint_path)
 
-    # Extract the denoiser from the trainer
-    denoiser = trainer.model
+    # Otherwise, you can just use a pretrained pipeline
+    from diffusers import StableDiffusionPipeline
 
-    # Initialize a default Sampler
-    sampler = Sampler()
-    sampler.config.postprocess = True
+    pipe = StableDiffusionPipeline.from_pretrained(output_path, local_files_only = True)
 
-    # Sample for the panda prompt
-    panda_prompt = ["Photo of a mad scientist panda"]
-    samples = sampler.sample(panda_prompt, denoiser)
-
-To actually run this code or make tweaks, please see the notebooks under the examples folder.
+To actually run this code or make tweaks, please see the notebooks or scripts under the examples folder.
 
 
 
