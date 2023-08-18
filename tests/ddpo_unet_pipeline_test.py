@@ -1,3 +1,6 @@
+"""
+This script tests if pipelines + LDM unet work with DDPO sampler
+"""
 
 from drlx.denoisers.ldm_unet import LDMUNet
 from drlx.configs import ModelConfig, SamplerConfig

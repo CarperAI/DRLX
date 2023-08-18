@@ -104,10 +104,10 @@ class DDPOTrainer(BaseTrainer):
             for prefix in kw_str.split(","):
                 suppress_warnings(prefix.strip())
 
+        self.pipe = None # Store reference to pipeline so that we can use save_pretrained later
         self.model = self.setup_model()
         self.optimizer = self.setup_optimizer()
         self.scheduler = self.setup_scheduler()
-        self.pipe = None # Store reference to pipeline so that we can use save_pretrained later
 
         self.sampler = self.model.sampler
         self.model, self.optimizer, self.scheduler = self.accelerator.prepare(
@@ -140,7 +140,9 @@ class DDPOTrainer(BaseTrainer):
         """
         model = self.get_arch(self.config)(self.config.model, sampler = DDPOSampler(self.config.sampler))
         if self.config.model.model_path is not None:
-            _, self.pipe = model.from_pretrained_pipeline(StableDiffusionPipeline, self.config.model.model_path)            
+            model, pipe = model.from_pretrained_pipeline(StableDiffusionPipeline, self.config.model.model_path)
+
+        self.pipe = pipe            
         return model
 
     def loss(
@@ -347,8 +349,8 @@ class DDPOTrainer(BaseTrainer):
             accum += 1
             if accum % self.config.train.checkpoint_interval == 0 and self.config.train.checkpoint_interval > 0:
                 self.print_in_main("Saving...")
-                base_path = f"checkpoints/{self.config.logging.run_name}"
-                output_path = f"output/{self.config.logging.run_name}"
+                base_path = f"./checkpoints/{self.config.logging.run_name}"
+                output_path = f"./output/{self.config.logging.run_name}"
                 self.accelerator.wait_for_everyone()
                 self.save_checkpoint(f"{base_path}/{accum}")
                 self.save_pretrained(output_path)
@@ -366,9 +368,9 @@ class DDPOTrainer(BaseTrainer):
         :param fp: File path to save checkpoint to
         """
         if self.accelerator.is_main_process:
-            if not os.path.exists(fp):
-                os.makedirs(fp)
+            os.makedirs(fp, exist_ok = True)
             self.accelerator.save_state(output_dir=fp)
+        self.accelerator.wait_for_everyone() # need to use this twice or a corrupted state is saved
 
     def save_pretrained(self, fp : str):
         """
@@ -377,11 +379,22 @@ class DDPOTrainer(BaseTrainer):
         :param fp: File path to save to
         """
         if self.accelerator.is_main_process:
-            if not os.path.exists(fp):
-                os.makedirs(fp)
+            os.makedirs(fp, exist_ok = True)
             unwrapped_model = self.accelerator.unwrap_model(self.model)
+            #unwrapped_model.unet.save_pretrained(fp)
             self.pipe.unet = unwrapped_model.unet
             self.pipe.save_pretrained(fp)
+        self.accelerator.wait_for_everyone()
+
+    def extract_pipeline(self):
+        """
+        Return original pipeline with finetuned denoiser plugged in
+
+        :return: Diffusers pipeline
+        """
+
+        self.pipe.unet = self.accelerator.unwrap_model(self.model).unet
+        return self.pipe
 
     def load_checkpoint(self, fp : str):
         """
