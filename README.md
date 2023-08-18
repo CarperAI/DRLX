@@ -52,3 +52,10 @@ image.save("test.jpeg")
 accelerate config
 accelerate launch -m [your module]
 ```
+
+# Roadmap  
+
+- [x] Initial launch and DDPO
+- [ ] DPO
+- [ ] PickScore Tuned Models
+- [ ] SDXL support

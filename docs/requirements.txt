@@ -9,4 +9,5 @@ xformers
 wandb
 fastprogress
 matplotlib
+git+https://github.com/openai/CLIP.git
 tqdm
