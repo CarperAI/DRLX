@@ -6,7 +6,6 @@ from typing import Any, Dict, Iterable, Tuple
 from collections import deque
 import torch
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR
-from diffusers import StableDiffusionPipeline
 import logging
 import time
 
@@ -76,21 +75,6 @@ def get_scheduler_class(name: SchedulerName):
         return LinearLR
     supported_schedulers = [s.value for s in SchedulerName]
     raise ValueError(f"`{name}` is not a supported scheduler. " f"Supported schedulers are: {supported_schedulers}")
-
-
-
-class DiffusionPipelineName(str, Enum):
-    """Supported diffusion pipeline names"""
-    StableDiffusion = "stable_diffusion"
-
-def get_diffusion_pipeline_class(name: DiffusionPipelineName):
-    """
-    Returns the diffusion pipeline class with the given name
-    """
-    if name == DiffusionPipelineName.StableDiffusion:
-        return StableDiffusionPipeline
-    supported_diffusion_pipelines = [d.value for d in DiffusionPipelineName]
-    raise ValueError(f"`{name}` is not a supported diffusion pipeline. " f"Supported diffusion pipelines are: {supported_diffusion_pipelines}")
 
 def any_chunk(x, chunk_size):
     """
@@ -176,6 +160,22 @@ class PerPromptStatTracker:
             advantages[prompts == prompt] = (prompt_rewards - mean) / std
 
         return advantages
+
+
+def unet_attn_processors_state_dict(unet) -> Dict[str, torch.tensor]:
+    """
+    Returns:
+        a state dict containing just the attention processor parameters.
+    """
+    attn_processors = unet.attn_processors
+
+    attn_processors_state_dict = {}
+
+    for attn_processor_key, attn_processor in attn_processors.items():
+        for parameter_key, parameter in attn_processor.state_dict().items():
+            attn_processors_state_dict[f"{attn_processor_key}.{parameter_key}"] = parameter
+
+    return attn_processors_state_dict
 
 def rescale_noise_cfg(noise_cfg, noise_pred_text, guidance_rescale=0.0):
     """

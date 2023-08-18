@@ -2,8 +2,17 @@ from torchtyping import TensorType
 from typing import Iterable, Union, Callable, Type, Tuple
 
 import torch
+import torch.nn.functional as F
 import numpy as np
 from diffusers import UNet2DConditionModel, DDIMScheduler
+from diffusers.models.attention_processor import (
+    AttnAddedKVProcessor,
+    AttnAddedKVProcessor2_0,
+    LoRAAttnAddedKVProcessor,
+    LoRAAttnProcessor,
+    LoRAAttnProcessor2_0,
+    SlicedAttnAddedKVProcessor,
+)
 
 from drlx.denoisers import BaseConditionalDenoiser
 from drlx.configs import ModelConfig, SamplerConfig
@@ -75,11 +84,40 @@ class LDMUNet(BaseConditionalDenoiser):
 
         self.text_encoder.requires_grad_(False)
         self.vae.requires_grad_(False)
+        self.unet.requires_grad_(not self.config.use_lora)
 
         self.tokenizer = pipe.tokenizer
         self.scheduler = DDIMScheduler.from_config(pipe.scheduler.config)
 
         if self.config.gradient_checkpointing: self.unet.enable_gradient_checkpointing()
+
+        if self.config.use_lora:
+            # Set correct lora layers
+            unet_lora_attn_procs = {}
+            for name, attn_processor in self.unet.attn_processors.items():
+                cross_attention_dim = None if name.endswith("attn1.processor") else self.unet.config.cross_attention_dim
+                if name.startswith("mid_block"):
+                    hidden_size = self.unet.config.block_out_channels[-1]
+                elif name.startswith("up_blocks"):
+                    block_id = int(name[len("up_blocks.")])
+                    hidden_size = list(reversed(self.unet.config.block_out_channels))[block_id]
+                elif name.startswith("down_blocks"):
+                    block_id = int(name[len("down_blocks.")])
+                    hidden_size = self.unet.config.block_out_channels[block_id]
+
+                if isinstance(attn_processor, (AttnAddedKVProcessor, SlicedAttnAddedKVProcessor, AttnAddedKVProcessor2_0)):
+                    lora_attn_processor_class = LoRAAttnAddedKVProcessor
+                else:
+                    lora_attn_processor_class = (
+                        LoRAAttnProcessor2_0 if hasattr(F, "scaled_dot_product_attention") else LoRAAttnProcessor
+                    )
+
+                module = lora_attn_processor_class(
+                    hidden_size=hidden_size, cross_attention_dim=cross_attention_dim, rank=self.config.lora_rank
+                )
+                module.requires_grad_(True)
+                unet_lora_attn_procs[name] = module
+            self.unet.set_attn_processor(unet_lora_attn_procs)
 
         return self
     

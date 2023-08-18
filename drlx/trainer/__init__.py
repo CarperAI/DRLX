@@ -10,7 +10,7 @@ from drlx.configs import DRLXConfig
 from drlx.reward_modelling import RewardModel   
 from drlx.denoisers.ldm_unet import LDMUNet
 from drlx.pipeline import Pipeline
-from drlx.utils import get_optimizer_class, get_scheduler_class, get_diffusion_pipeline_class
+from drlx.utils import get_optimizer_class, get_scheduler_class
 
 from PIL import Image
 

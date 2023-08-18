@@ -5,7 +5,7 @@ from accelerate import Accelerator
 from drlx.configs import DRLXConfig, DDPOConfig
 from drlx.trainer import BaseTrainer
 from drlx.sampling import DDPOSampler
-from drlx.utils import suppress_warnings, Timer, PerPromptStatTracker
+from drlx.utils import suppress_warnings, unet_attn_processors_state_dict, Timer, PerPromptStatTracker
 
 import torch
 import einops as eo
@@ -18,6 +18,7 @@ import numpy as np
 import wandb
 from PIL import Image
 
+from diffusers.loaders import LoraLoaderMixin
 from diffusers import StableDiffusionPipeline
 
 class DDPOExperienceReplay(Dataset):
@@ -108,6 +109,9 @@ class DDPOTrainer(BaseTrainer):
         self.optimizer = self.setup_optimizer()
         self.scheduler = self.setup_scheduler()
 
+        self.accelerator.register_save_state_pre_hook(self._save_model_hook)
+        self.accelerator.register_load_state_pre_hook(self._load_model_hook)
+
         self.sampler = self.model.sampler
         self.model, self.optimizer, self.scheduler = self.accelerator.prepare(
             self.model, self.optimizer, self.scheduler
@@ -141,6 +145,39 @@ class DDPOTrainer(BaseTrainer):
         if self.config.model.model_path is not None:
             model.from_pretrained_pipeline(StableDiffusionPipeline, self.config.model.model_path)            
         return model
+
+
+    # create custom saving & loading hooks so that `accelerator.save_state(...)` serializes in a nice format
+    def _save_model_hook(self, models, weights, output_dir):
+        # there are only two options here. Either are just the unet attn processor layers
+        # or there are the unet and text encoder atten layers
+        unet_lora_layers_to_save = None
+
+        for model in models: # only doing unet not text encoder
+            if isinstance(model, type(self.accelerator.unwrap_model(self.model.unet))):
+                unet_lora_layers_to_save = unet_attn_processors_state_dict(model)
+            else:
+                raise ValueError(f"unexpected save model: {model.__class__}")
+            # make sure to pop weight so that corresponding model is not saved again
+            weights.pop()
+
+        LoraLoaderMixin.save_lora_weights(output_dir, unet_lora_layers=unet_lora_layers_to_save)
+
+    def _load_model_hook(self, models, input_dir):
+        unet_ = None
+
+        while len(models) > 0:
+            model = models.pop()
+
+            if isinstance(model, type(self.accelerator.unwrap_model(self.model.unet))):
+                unet_ = model
+            else:
+                raise ValueError(f"unexpected save model: {model.__class__}")
+
+        lora_state_dict, network_alphas = LoraLoaderMixin.lora_state_dict(input_dir)
+        LoraLoaderMixin.load_lora_into_unet(lora_state_dict, network_alphas=network_alphas, unet=unet_)
+
+
 
     def loss(
         self,
