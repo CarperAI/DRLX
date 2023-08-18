@@ -22,9 +22,9 @@ scheduler:
     eta_min: 1.412e-4
   
 logging:
-  run_name: None
-  wandb_entity: None
-  wandb_project: None
+  run_name: ddpo_exp
+  #wandb_entity: None
+  #wandb_project: None
 
 train:
   total_samples: 5.0e+4 # 50k
