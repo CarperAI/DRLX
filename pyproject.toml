@@ -1,0 +1,94 @@
+[build-system]
+requires = ["setuptools>=64", "setuptools_scm[toml]>=7"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
+
+[tool.setuptools_scm]
+
+[tool.isort]
+profile = "black"
+
+[tool.flake8]
+max-line-length = 88
+extend-ignore = [
+    "E203",
+    "E501",
+    "W503",
+    "F811",
+]
+extend-exclude = ["docs"]
+count = true
+statistics = true
+
+[tool.pydocstyle]
+convention = "google"
+add-ignore = "D10, D212"
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+addopts = "-rA -x --doctest-modules --color=yes" # --cov=openelm"  # Uncomment this for coverage by default
+testpaths = ["tests"]
+doctest_optionflags = ["NORMALIZE_WHITESPACE", "IGNORE_EXCEPTION_DETAIL"]
+
+[project]
+name = "drlx"
+version = "0.0.2"
+description = "DRLX is a library for distributed training of diffusion models via RL"
+authors = [{name = "CarperAI"}]
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+dynamic = ["dependencies"]
+classifiers=[
+    # Trove classifiers
+    # Full list: https://pypi.python.org/pypi?%3Aaction=list_classifiers
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Natural Language :: English",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Typing :: Typed",
+    "Operating System :: Unix",
+]
+
+[project.optional-dependencies]
+dev = [
+    "black",
+    "isort",
+    "flake8",
+    "flake8-pyproject",
+    "pydocstyle",
+    "mypy",
+    "pre-commit",
+    "pytest",
+    "pytest-cov",
+]
+benchmarks = [
+    "pygraphviz",
+    "graphviz",
+    "openai",
+]
+docs = [
+    "sphinx==5.3.0",
+    "sphinx_rtd_theme",
+    "sphinx_autodoc_typehints",
+]
+triton = [
+    "tritonclient[all]",
+]
+notebook = ["ipython"]
+sodaracer = [
+    "swig>=4.1.0",
+    "box2d-py==2.3.8",
+    "pygame"
+]

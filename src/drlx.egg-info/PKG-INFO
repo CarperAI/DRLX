@@ -1,3 +1,33 @@
+Metadata-Version: 2.1
+Name: drlx
+Version: 0.0.2
+Summary: DRLX is a library for distributed training of diffusion models via RL
+Author: CarperAI
+License: MIT
+Classifier: Development Status :: 3 - Alpha
+Classifier: Environment :: Console
+Classifier: Intended Audience :: Science/Research
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Natural Language :: English
+Classifier: Programming Language :: Python
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3 :: Only
+Classifier: Programming Language :: Python :: Implementation :: CPython
+Classifier: Topic :: Scientific/Engineering :: Artificial Intelligence
+Classifier: Typing :: Typed
+Classifier: Operating System :: Unix
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+Provides-Extra: dev
+Provides-Extra: benchmarks
+Provides-Extra: docs
+Provides-Extra: triton
+Provides-Extra: notebook
+Provides-Extra: sodaracer
+
 # Diffuser Reinforcement Learning X
 
 DRLX is a library for distributed training of diffusion models via RL. It is meant to wrap around 🤗 Hugging Face's [Diffusers](https://huggingface.co/docs/diffusers/) library and uses [Accelerate](https://huggingface.co/docs/accelerate/) for Multi-GPU and Multi-Node (as of yet untested)
@@ -6,9 +36,8 @@ DRLX is a library for distributed training of diffusion models via RL. It is mea
 
 # Setup
 
-First make sure you've installed [OpenCLIP](https://github.com/openai/CLIP.git). Afterwards, you can install the library from pypi:
-
-```sh
+You can install the library from pypi:
+```
 pip install drlx
 ```
 
