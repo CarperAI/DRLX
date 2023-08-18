@@ -6,6 +6,17 @@ DRLX is a library for distributed training of diffusion models via RL. It is mea
 
 # Setup
 
+You can install the library from pypi:
+```
+pip install drlx
+```
+
+or from source:
+
+```sh
+pip install git+https://github.com/CarperAI/DRLX.git
+```
+
 # How to use
 
 Currently we have only tested the library with StableDiffusion 1.4, but the plug and play nature of it means that realistically any denoiser from any pipeline should be usable. Models saved with DRLX are compatible with the pipeline they originated from and can be loaded like any other pretrained model. Currently the only algorithm supported for training is [DDPO](https://arxiv.org/abs/2305.13301).
