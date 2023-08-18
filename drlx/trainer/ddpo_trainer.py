@@ -104,6 +104,7 @@ class DDPOTrainer(BaseTrainer):
             for prefix in kw_str.split(","):
                 suppress_warnings(prefix.strip())
 
+        self.pipe = None # Store reference to pipeline so that we can use save_pretrained later
         self.model = self.setup_model()
         self.optimizer = self.setup_optimizer()
         self.scheduler = self.setup_scheduler()
@@ -139,7 +140,9 @@ class DDPOTrainer(BaseTrainer):
         """
         model = self.get_arch(self.config)(self.config.model, sampler = DDPOSampler(self.config.sampler))
         if self.config.model.model_path is not None:
-            model.from_pretrained_pipeline(StableDiffusionPipeline, self.config.model.model_path)            
+            model, pipe = model.from_pretrained_pipeline(StableDiffusionPipeline, self.config.model.model_path)
+
+        self.pipe = pipe            
         return model
 
     def loss(
@@ -346,26 +349,52 @@ class DDPOTrainer(BaseTrainer):
             accum += 1
             if accum % self.config.train.checkpoint_interval == 0 and self.config.train.checkpoint_interval > 0:
                 self.print_in_main("Saving...")
-                base_path = f"checkpoints/{self.config.logging.run_name}"
-                if not os.path.exists(base_path) and self.accelerator.is_main_process:
-                    os.makedirs(base_path)
+                base_path = f"./checkpoints/{self.config.logging.run_name}"
+                output_path = f"./output/{self.config.logging.run_name}"
+                self.accelerator.wait_for_everyone()
                 self.save_checkpoint(f"{base_path}/{accum}")
+                self.save_pretrained(output_path)
 
             last_epoch_time = time_per_1k(self.config.train.num_samples_per_epoch)
             
             del loss, experience_loader
             gc.collect()
             torch.cuda.empty_cache()
+
     def save_checkpoint(self, fp : str, components = None):
         """
         Save checkpoint in main process
 
         :param fp: File path to save checkpoint to
         """
-        self.accelerator.wait_for_everyone()
         if self.accelerator.is_main_process:
+            os.makedirs(fp, exist_ok = True)
             self.accelerator.save_state(output_dir=fp)
-        
+        self.accelerator.wait_for_everyone() # need to use this twice or a corrupted state is saved
+
+    def save_pretrained(self, fp : str):
+        """
+        Save model into pretrained pipeline so it can be loaded in pipeline later
+
+        :param fp: File path to save to
+        """
+        if self.accelerator.is_main_process:
+            os.makedirs(fp, exist_ok = True)
+            unwrapped_model = self.accelerator.unwrap_model(self.model)
+            #unwrapped_model.unet.save_pretrained(fp)
+            self.pipe.unet = unwrapped_model.unet
+            self.pipe.save_pretrained(fp)
+        self.accelerator.wait_for_everyone()
+
+    def extract_pipeline(self):
+        """
+        Return original pipeline with finetuned denoiser plugged in
+
+        :return: Diffusers pipeline
+        """
+
+        self.pipe.unet = self.accelerator.unwrap_model(self.model).unet
+        return self.pipe
 
     def load_checkpoint(self, fp : str):
         """

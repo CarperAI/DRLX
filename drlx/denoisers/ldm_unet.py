@@ -59,7 +59,7 @@ class LDMUNet(BaseConditionalDenoiser):
         :param path: Path to pretrained pipeline
         :type path: str
 
-        :return: an LDMUNet object with UNet, Text Encoder, VAE, tokenizer and scheduler from pretrained pipeline
+        :return: an LDMUNet object with UNet, Text Encoder, VAE, tokenizer and scheduler from pretrained pipeline. Also returns the pretrained pipeline in case caller needs it.
         :rtype: LDMUNet
         """
         pipe = cls.from_pretrained(path)
@@ -81,7 +81,7 @@ class LDMUNet(BaseConditionalDenoiser):
 
         if self.config.gradient_checkpointing: self.unet.enable_gradient_checkpointing()
 
-        return self
+        return self, pipe
     
     def preprocess(self, text : Iterable[str], mode = "tokens", **embed_kwargs):
         """
