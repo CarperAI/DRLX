@@ -6,9 +6,6 @@ class MadScientistPandaPrompts(PromptPipeline):
     """
     Custom prompt pipeline that only gives a single phrase "Photo of a mad scientist panda" over and over.
     """
-    def __init__(self, *args):
-        super().__init__(*args)
-
     def __getitem__(self, index):
         return "Photo of a mad scientist panda"
 
@@ -25,9 +22,6 @@ class HighContrastReward(RewardModel):
     """
     Rewards high contrast in the image.
     """
-    def __init__(self):
-        super().__init__()
-
     def forward(self, images, prompts):
         # If the input is a list of PIL Images, convert to numpy array
         if isinstance(images, list):
