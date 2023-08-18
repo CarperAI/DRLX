@@ -155,7 +155,7 @@ class LoggingConfig(ConfigClass):
     :param log_with: Logging backend to use (either "wandb" or "tensorboard")
     :type log_with: str
 
-    :param run_name: Name of the run
+    :param run_name: Name of the run. Also used during saving.
     :type run_name: str
 
     :param wandb_entity: Name of the wandb entity to log to
