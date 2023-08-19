@@ -2,12 +2,11 @@ method:
   name : "DDPO"
 
 model:
-  model_path: "RunwayML/stable-diffusion-v1-5"
+  model_path: "stabilityai/stable-diffusion-2-1"
   model_arch_type: "LDMUnet"
   attention_slicing: True
   xformers_memory_efficient: True
   gradient_checkpointing: True
-  use_lora: False
 
 sampler:
   num_inference_steps: 50
@@ -15,7 +14,7 @@ sampler:
 optimizer:
   name: "adamw"
   kwargs:
-    lr: 1.0e-5
+    lr: 5.0e-6
     weight_decay: 1.0e-4
     betas: [0.9, 0.999]
 

@@ -237,7 +237,7 @@ class ModelConfig(ConfigClass):
     xformers_memory_efficient: bool = False 
     gradient_checkpointing: bool = False
     use_lora: bool = False
-    lora_rank: int = 4
+    lora_rank: int = 2
 
 
 
