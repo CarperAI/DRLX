@@ -273,24 +273,25 @@ class DDPOTrainer(BaseTrainer):
         last_epoch_time = timer.hit()
         for epoch in range(outer_epochs):
             preds, all_step_preds, log_probs, all_prompts = [], [], [], []
+            gc.collect()
+            torch.cuda.empty_cache()
             self.print_in_main(f"Epoch {epoch}/{outer_epochs}. {epoch * self.config.train.num_samples_per_epoch} samples seen. Averaging {last_epoch_time:.2f}s/1k samples.")
             # Make a new dataloader to reshuffle data
-            dataloader = self.accelerator.prepare(
-                prompt_pipeline.create_train_loader(batch_size = self.config.train.sample_batch_size, shuffle = True)
-                )
+            dataloader = prompt_pipeline.create_train_loader(batch_size = self.config.train.sample_batch_size, shuffle = True)
+            dataloader = self.accelerator.prepare(dataloader)
             # Sample (play the game)
             data_steps = self.config.train.num_samples_per_epoch // self.config.train.sample_batch_size // self.world_size
             self.print_in_main("Sampling...")
             for i, prompts in enumerate(tqdm(dataloader, total = data_steps, disable=not self.accelerator.is_main_process)):            
+                if i >= data_steps:
+                    break
+
                 batch_preds, batch_all_step_preds, batch_log_probs = self.sample(prompts)
                 
                 preds.append(batch_preds)
                 all_step_preds.append(batch_all_step_preds)
                 log_probs.append(batch_log_probs)
                 all_prompts.append(prompts)
-            
-                if i + 1 >= data_steps:
-                    break
 
             # Get rewards from experiences
             self.accelerator.wait_for_everyone()
@@ -358,8 +359,6 @@ class DDPOTrainer(BaseTrainer):
             last_epoch_time = time_per_1k(self.config.train.num_samples_per_epoch)
             
             del loss, experience_loader
-            gc.collect()
-            torch.cuda.empty_cache()
 
     def save_checkpoint(self, fp : str, components = None):
         """

@@ -54,13 +54,14 @@ class PickScoreModel(NNRewardModel):
         input_ids : TensorType["batch", "sequence"],
         attention_mask : TensorType["batch", "sequence"]
     ) -> TensorType["batch"]:
-        image_embs = self.model.get_image_features(pixel_values=pixel_values)
+
+        image_embs = self.model.get_image_features(pixel_values=pixel_values.cuda())
         image_embs /= image_embs.norm(dim=-1, keepdim=True)
 
-        text_embs = self.model.get_text_features(input_ids=input_ids, attention_mask=attention_mask)
+        text_embs = self.model.get_text_features(input_ids=input_ids.cuda(), attention_mask=attention_mask.cuda())
         text_embs /= text_embs.norm(dim=-1, keepdim=True)
 
         scores = torch.einsum('bd,bd->b', image_embs, text_embs)
         scores = self.model.logit_scale.exp() * scores
-
+        
         return scores

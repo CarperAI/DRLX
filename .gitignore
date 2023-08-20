@@ -3,3 +3,5 @@ dist
 wandb/*
 __pycache__/
 checkpoints/
+*.egg-info/
+output/

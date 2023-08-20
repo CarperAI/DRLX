@@ -68,8 +68,11 @@ class Pipeline(Dataset):
             raise ValueError("Preprocessing function must be set before creating a dataloader.")
 
         if 'shuffle' in kwargs:
-            del kwargs['shuffle']
-
+            if kwargs['shuffle'] and 'generator' not in kwargs:
+                generator = torch.Generator()
+                generator.manual_seed(int(torch.empty((), dtype=torch.int64).random_().item()))
+                kwargs['generator'] = generator
+                
         return DataLoader(self, collate_fn = self.make_default_collate(self.prep), **kwargs)
 
 class PromptPipeline(Pipeline):
