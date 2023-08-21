@@ -2,7 +2,7 @@ method:
   name : "DDPO"
 
 model:
-  model_path: "RunwayML/stable-diffusion-v1-5"
+  model_path: "stabilityai/stable-diffusion-2-1-base"
   model_arch_type: "LDMUnet"
   attention_slicing: True
   xformers_memory_efficient: True
@@ -14,7 +14,7 @@ sampler:
 optimizer:
   name: "adamw"
   kwargs:
-    lr: 4.0e-5
+    lr: 1.0e-5
     weight_decay: 1.0e-4
     betas: [0.9, 0.999]
 

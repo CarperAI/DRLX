@@ -273,6 +273,7 @@ class DDPOTrainer(BaseTrainer):
         last_epoch_time = timer.hit()
         for epoch in range(outer_epochs):
             preds, all_step_preds, log_probs, all_prompts = [], [], [], []
+            self.accelerator._dataloaders = [] # Clear dataloaders
             gc.collect()
             torch.cuda.empty_cache()
             self.print_in_main(f"Epoch {epoch}/{outer_epochs}. {epoch * self.config.train.num_samples_per_epoch} samples seen. Averaging {last_epoch_time:.2f}s/1k samples.")
@@ -358,7 +359,7 @@ class DDPOTrainer(BaseTrainer):
 
             last_epoch_time = time_per_1k(self.config.train.num_samples_per_epoch)
             
-            del loss, experience_loader
+            del loss, dataloader, experience_loader
 
     def save_checkpoint(self, fp : str, components = None):
         """
