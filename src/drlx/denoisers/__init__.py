@@ -44,6 +44,7 @@ class BaseConditionalDenoiser(nn.Module):
 
         :return: Varies per sampler but always includes denoised latent/images
         """
+        kwargs['denoiser'] = self
         return self.sampler.sample(**kwargs)
         
     @abstractmethod
