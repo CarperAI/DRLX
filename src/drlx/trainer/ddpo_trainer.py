@@ -313,7 +313,8 @@ class DDPOTrainer(BaseTrainer):
                 imgs, all_prompts,
                 all_step_preds, log_probs
             )
-            all_rewards = exp_replay.rewards
+            all_rewards = self.accelerator.gather(exp_replay.rewards).detach().cpu().numpy()
+
             experience_loader = exp_replay.create_loader(batch_size = self.config.train.batch_size)
 
             mean_rewards.append(all_rewards.mean().item())
@@ -327,8 +328,8 @@ class DDPOTrainer(BaseTrainer):
             # Logging
             if self.use_wandb:
                 self.accelerator.log({
-                    "mean_reward" : all_rewards.mean().item(),
-                    "reward_hist" : wandb.Histogram(all_rewards.detach().cpu().numpy()),
+                    "mean_reward" : mean_rewards[-1],
+                    "reward_hist" : wandb.Histogram(all_rewards),
                     "time_per_1k" : last_epoch_time,
                     "img_batch" : batch_imgs,
                     "img_sample" : sample_imgs
