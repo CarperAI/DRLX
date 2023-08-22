@@ -9,6 +9,7 @@ from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR
 from diffusers import StableDiffusionPipeline
 import logging
 import time
+from contextlib import contextmanager
 
 import numpy as np
 
@@ -189,3 +190,27 @@ def rescale_noise_cfg(noise_cfg, noise_pred_text, guidance_rescale=0.0):
     # mix with the original results from guidance by factor guidance_rescale to avoid "plain looking" images
     noise_cfg = guidance_rescale * noise_pred_rescaled + (1 - guidance_rescale) * noise_cfg
     return noise_cfg
+
+@contextmanager
+def scoped_seed(seed : int = 0):
+    """
+    Set torch seed within a context. Useful for deterministic sampling.
+
+    :param seed: Seed to use for random state
+    :type seed: int
+    """
+    # Record the state of the RNG
+    cpu_rng_state = torch.get_rng_state()
+    if torch.cuda.is_available():
+        cuda_rng_state = torch.cuda.get_rng_state()
+    
+    # Set the desired seed
+    torch.manual_seed(seed)
+    
+    try:
+        yield
+    finally:
+        # Restore the previous RNG state after exiting the scope
+        torch.set_rng_state(cpu_rng_state)
+        if torch.cuda.is_available():
+            torch.cuda.set_rng_state(cuda_rng_state)

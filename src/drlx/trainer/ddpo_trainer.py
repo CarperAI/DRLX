@@ -5,7 +5,7 @@ from accelerate import Accelerator
 from drlx.configs import DRLXConfig, DDPOConfig
 from drlx.trainer import BaseTrainer
 from drlx.sampling import DDPOSampler
-from drlx.utils import suppress_warnings, Timer, PerPromptStatTracker
+from drlx.utils import suppress_warnings, Timer, PerPromptStatTracker, scoped_seed
 
 import torch
 import einops as eo
@@ -242,9 +242,13 @@ class DDPOTrainer(BaseTrainer):
 
         # === SETUP ===
 
-        dataloader = self.accelerator.prepare(
-            prompt_pipeline.create_train_loader(batch_size = self.config.train.batch_size, shuffle = False)
-        )
+        # Singular dataloader made to get a sample of prompts
+        # This sample batch is dependent on config seed so it can be same across runs
+        with scoped_seed(self.config.train.seed):
+            dataloader = self.accelerator.prepare(
+                prompt_pipeline.create_train_loader(batch_size = self.config.train.batch_size, shuffle = False)
+            )
+            sample_prompts = next(iter(dataloader))
 
         assert isinstance(self.sampler, DDPOSampler), "Error: Model Sampler for DDPO training must be DDPO sampler"
 
@@ -252,8 +256,6 @@ class DDPOTrainer(BaseTrainer):
 
         if isinstance(reward_fn, torch.nn.Module):
             reward_fn = self.accelerator.prepare(reward_fn)
-
-        sample_prompts = next(iter(dataloader))
 
         # Set the epoch count
         outer_epochs = self.config.train.num_epochs
@@ -272,14 +274,19 @@ class DDPOTrainer(BaseTrainer):
         accum = 0
         last_epoch_time = timer.hit()
         for epoch in range(outer_epochs):
+
+            # Clean up unused resources
             preds, all_step_preds, log_probs, all_prompts = [], [], [], []
             self.accelerator._dataloaders = [] # Clear dataloaders
             gc.collect()
             torch.cuda.empty_cache()
+
             self.print_in_main(f"Epoch {epoch}/{outer_epochs}. {epoch * self.config.train.num_samples_per_epoch} samples seen. Averaging {last_epoch_time:.2f}s/1k samples.")
+            
             # Make a new dataloader to reshuffle data
             dataloader = prompt_pipeline.create_train_loader(batch_size = self.config.train.sample_batch_size, shuffle = True)
             dataloader = self.accelerator.prepare(dataloader)
+            
             # Sample (play the game)
             data_steps = self.config.train.num_samples_per_epoch // self.config.train.sample_batch_size // self.world_size
             self.print_in_main("Sampling...")
@@ -312,7 +319,8 @@ class DDPOTrainer(BaseTrainer):
             mean_rewards.append(all_rewards.mean().item())
 
             # Consistent prompt sample for logging
-            sample_imgs, sample_rewards, _, _ = self.sample_and_calculate_rewards(sample_prompts, reward_fn)
+            with scoped_seed(self.config.train.seed):
+                sample_imgs, sample_rewards, _, _ = self.sample_and_calculate_rewards(sample_prompts, reward_fn)
             sample_imgs = [wandb.Image(Image.fromarray(img), caption=prompt + f', {reward.item()}') for img, prompt, reward in zip(sample_imgs, sample_prompts, sample_rewards)]
             batch_imgs = [wandb.Image(Image.fromarray(img), caption=prompt) for img, prompt in zip(imgs[-1], all_prompts[-1])]
 
