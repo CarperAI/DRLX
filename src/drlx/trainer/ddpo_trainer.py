@@ -16,6 +16,7 @@ from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 import numpy as np
 import wandb
+import accelerate.utils
 from PIL import Image
 
 from diffusers import StableDiffusionPipeline
@@ -26,6 +27,7 @@ class DDPOExperienceReplay(Dataset):
     """
 
     def __init__(self,
+        accelerator: Accelerator,
         reward_fn: callable, 
         ppst: PerPromptStatTracker,
         imgs : Iterable[Iterable], 
@@ -37,24 +39,27 @@ class DDPOExperienceReplay(Dataset):
         # Compute rewards first
         rewards = [reward_fn(img_batch, prompt_batch) 
                     for img_batch, prompt_batch in zip(imgs, prompts)]
-        advantages = [torch.from_numpy(ppst.update(np.array(prompt_batch), reward_batch.squeeze().cpu().detach().numpy())).float() 
-                        for prompt_batch, reward_batch in zip(prompts, rewards)]
 
-        # Combine all_step_preds, log_probs, and advantages
-        all_step_preds = torch.cat(all_step_preds, dim = 1) # [t, n, c, h, w]
-        log_probs = torch.cat(log_probs, dim = 1) # [t, n]
-        advantages = torch.cat(advantages)
-        rewards = torch.cat(rewards)
 
-        self.all_step_preds = all_step_preds
-        self.log_probs = log_probs
-        self.advantages = advantages
-        self.rewards = rewards
+        # Combine all_step_preds, log_probs
+        self.all_step_preds = torch.cat(all_step_preds, dim = 1) # [t, n, c, h, w]
+        self.log_probs = torch.cat(log_probs, dim = 1) # [t, n]
+        self.rewards = torch.cat(rewards) # [n]
+
+        # Gather all rewards
+        self.all_rewards = accelerator.gather(self.rewards).detach().cpu().numpy()
 
         # Prompts is list of batches of prompts (list of list of strings)
         # Iterate through each batch and each prompt within it to unwrap into single list of prompts
         self.prompts = [prompt for prompt_list in prompts for prompt in prompt_list]
         
+        # Gather all prompts
+        self.all_prompts = accelerate.utils.gather_object(self.prompts)
+
+        # Compute advantages
+        advantages = torch.from_numpy(ppst.update(np.array(self.all_prompts), self.all_rewards)).float()
+        self.advantages = advantages.reshape(accelerator.num_processes, -1)[accelerator.process_index].to(accelerator.device)
+            
     def __getitem__(self, i):
         return self.all_step_preds[:,i], self.log_probs[:,i], self.advantages[i], self.prompts[i]
 
@@ -221,12 +226,12 @@ class DDPOTrainer(BaseTrainer):
         rewards = reward_fn(imgs, prompts).to(self.accelerator.device)
         return imgs, rewards, all_preds, log_probs
     
-    def print_in_main(self, txt):
-        """
-        Utility function to use with accelerate so that messages are only printed once in main process
-        """
-        if self.accelerator.is_main_process:
-            print(txt)
+#    def print_in_main(self, txt):
+#        """
+#        Utility function to use with accelerate so that messages are only printed once in main process
+#        """
+#        if self.accelerator.is_main_process:
+#            print(txt)
     
     def train(self, prompt_pipeline, reward_fn):
         """
@@ -281,7 +286,7 @@ class DDPOTrainer(BaseTrainer):
             gc.collect()
             torch.cuda.empty_cache()
 
-            self.print_in_main(f"Epoch {epoch}/{outer_epochs}. {epoch * self.config.train.num_samples_per_epoch} samples seen. Averaging {last_epoch_time:.2f}s/1k samples.")
+            self.accelerator.print(f"Epoch {epoch}/{outer_epochs}. {epoch * self.config.train.num_samples_per_epoch} samples seen. Averaging {last_epoch_time:.2f}s/1k samples.")
             
             # Make a new dataloader to reshuffle data
             dataloader = prompt_pipeline.create_train_loader(batch_size = self.config.train.sample_batch_size, shuffle = True)
@@ -289,7 +294,7 @@ class DDPOTrainer(BaseTrainer):
             
             # Sample (play the game)
             data_steps = self.config.train.num_samples_per_epoch // self.config.train.sample_batch_size // self.world_size
-            self.print_in_main("Sampling...")
+            self.accelerator.print("Sampling...")
             for i, prompts in enumerate(tqdm(dataloader, total = data_steps, disable=not self.accelerator.is_main_process)):            
                 if i >= data_steps:
                     break
@@ -309,6 +314,7 @@ class DDPOTrainer(BaseTrainer):
             # Experience replay computes normalized rewards,
             # then is used to create a loader for training
             exp_replay = DDPOExperienceReplay(
+                self.accelerator,
                 reward_fn, per_prompt_stat_tracker,
                 imgs, all_prompts,
                 all_step_preds, log_probs
@@ -336,7 +342,7 @@ class DDPOTrainer(BaseTrainer):
                 })
 
             # Inner epochs and actual training
-            self.print_in_main("Training...")
+            self.accelerator.print("Training...")
             experience_loader = self.accelerator.prepare(experience_loader)
             # Inner epochs normally one, disable progress bar when this is the case 
             for inner_epoch in tqdm(range(self.config.method.num_inner_epochs),
@@ -359,7 +365,7 @@ class DDPOTrainer(BaseTrainer):
             # Save model every [interval] epochs
             accum += 1
             if accum % self.config.train.checkpoint_interval == 0 and self.config.train.checkpoint_interval > 0:
-                self.print_in_main("Saving...")
+                self.accelerator.print("Saving...")
                 base_path = f"./checkpoints/{self.config.logging.run_name}"
                 output_path = f"./output/{self.config.logging.run_name}"
                 self.accelerator.wait_for_everyone()
@@ -412,4 +418,4 @@ class DDPOTrainer(BaseTrainer):
         :param fp: File path to checkpoint to load from
         """
         self.accelerator.load_state(fp)
-        self.print_in_main("Succesfully loaded checkpoint")
+        self.accelerator.print("Succesfully loaded checkpoint")
