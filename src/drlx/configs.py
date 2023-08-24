@@ -145,6 +145,7 @@ class TrainConfig(ConfigClass):
     seed: int = 0
     tf32: bool = False
     suppress_log_keywords: str = None
+    sample_prompts : List[str] = None
 
 
 @dataclass

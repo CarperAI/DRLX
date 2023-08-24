@@ -226,13 +226,6 @@ class DDPOTrainer(BaseTrainer):
         rewards = reward_fn(imgs, prompts).to(self.accelerator.device)
         return imgs, rewards, all_preds, log_probs
     
-#    def print_in_main(self, txt):
-#        """
-#        Utility function to use with accelerate so that messages are only printed once in main process
-#        """
-#        if self.accelerator.is_main_process:
-#            print(txt)
-    
     def train(self, prompt_pipeline, reward_fn):
         """
         Trains the model based on config parameters. Needs to be passed a prompt pipeline and reward function.
@@ -253,7 +246,13 @@ class DDPOTrainer(BaseTrainer):
             dataloader = self.accelerator.prepare(
                 prompt_pipeline.create_train_loader(batch_size = self.config.train.batch_size, shuffle = False)
             )
-            sample_prompts = next(iter(dataloader))
+            sample_prompts = self.config.train.sample_prompts
+            if sample_prompts is None:
+                sample_prompts = []
+            if len(sample_prompts) < self.config.train.batch_size:
+                new_sample_prompts = next(iter(dataloader))
+                sample_prompts += new_sample_prompts
+                sample_prompts = sample_prompts[:self.config.train.batch_size]
 
         assert isinstance(self.sampler, DDPOSampler), "Error: Model Sampler for DDPO training must be DDPO sampler"
 
@@ -350,14 +349,16 @@ class DDPOTrainer(BaseTrainer):
             ):
                 for (all_step_preds, log_probs, advantages, prompts) in tqdm(experience_loader, disable=not self.accelerator.is_main_process):
                     with self.accelerator.accumulate(self.model): # Accumulate across minibatches
-                        loss = self.loss(all_step_preds, log_probs, advantages, prompts)
+                        metrics = self.loss(all_step_preds, log_probs, advantages, prompts)
                         self.accelerator.clip_grad_norm_(self.model.parameters(), self.config.train.grad_clip)
                         self.optimizer.step()
                         self.scheduler.step()
                         self.optimizer.zero_grad()
                         if self.use_wandb:
                             self.accelerator.log({ #TODO: add approx_kl tracking
-                                "loss" : loss, 
+                                "loss" : metrics["loss"],
+                                "kl_div" : metrics["kl_div"],
+                                "clip_frac" : metrics["clip_frac"], 
                                 "lr" : self.scheduler.get_last_lr()[0],
                                 "epoch": epoch
                             })
@@ -374,7 +375,7 @@ class DDPOTrainer(BaseTrainer):
 
             last_epoch_time = time_per_1k(self.config.train.num_samples_per_epoch)
             
-            del loss, dataloader, experience_loader
+            del metrics, dataloader, experience_loader
 
     def save_checkpoint(self, fp : str, components = None):
         """
@@ -396,7 +397,6 @@ class DDPOTrainer(BaseTrainer):
         if self.accelerator.is_main_process:
             os.makedirs(fp, exist_ok = True)
             unwrapped_model = self.accelerator.unwrap_model(self.model)
-            #unwrapped_model.unet.save_pretrained(fp)
             self.pipe.unet = unwrapped_model.unet
             self.pipe.save_pretrained(fp)
         self.accelerator.wait_for_everyone()
