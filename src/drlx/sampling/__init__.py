@@ -10,10 +10,6 @@ from drlx.utils import rescale_noise_cfg
 
 from drlx.configs import SamplerConfig, DDPOConfig
 
-# Credit to Tanishq Abraham (tmabraham) for notebook from which
-# both sampler and ddpo sampler code was adapted
-
-# TODO: Normal sampler doesn't work with accelerate
 class Sampler:
     """
     Generic class for sampling generations using a denoiser. Assumes LDMUnet
@@ -217,6 +213,12 @@ class DDPOSampler(Sampler):
         :return: Total loss computed over the sampling process
         """
 
+        # All metrics are reduced and gathered before result is returned
+        metrics = {
+            "loss" : [],
+            "kl_div" : [], # ~ KL div between new policy and old one (average)
+            "clip_frac" : [], # Proportion of policy updates where magnitude of update was clipped
+        }
 
         if accelerator is None:
             denoiser_unwrapped = denoiser
@@ -270,7 +272,19 @@ class DDPOSampler(Sampler):
                 accelerator.backward(loss)
             else:
                 loss.backward()
+
+            # Metric computations
+            kl_div = 0.5 * (log_probs - old_log_probs[i]).mean() ** 2
+            clip_frac = ((ratio < 1 - pi_clip) | (ratio > 1 + pi_clip)).float().mean()
             
-            total_loss += loss.item()
-        
-        return total_loss
+            metrics["loss"].append(loss.item())
+            metrics["kl_div"].append(kl_div.item())
+            metrics["clip_frac"].append(clip_frac.item())
+
+        # Reduce across timesteps then across devices
+        for k in metrics:
+            metrics[k] = torch.tensor(metrics[k]).mean().cuda() # Needed for reduction to work
+        if accelerator is not None:
+            metrics = accelerator.reduce(metrics, 'mean')
+
+        return metrics
