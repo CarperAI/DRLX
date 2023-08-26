@@ -10,6 +10,7 @@ from diffusers import StableDiffusionPipeline
 import logging
 import time
 from contextlib import contextmanager
+from PIL import Image
 
 import numpy as np
 
@@ -214,3 +215,16 @@ def scoped_seed(seed : int = 0):
         torch.set_rng_state(cpu_rng_state)
         if torch.cuda.is_available():
             torch.cuda.set_rng_state(cuda_rng_state)
+
+def save_images(images : np.array, fp : str):
+    """
+    Saves images to folder designated by fp
+    """
+
+    os.makedirs(fp, exist_ok = True)
+
+    images = [Image.fromarray(image) for image in images]
+    for i, image in enumerate(images):
+        image.save(os.path.join(fp,f"{i}.png"))
+
+
