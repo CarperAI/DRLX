@@ -9,6 +9,7 @@ model:
   gradient_checkpointing: True
 
 sampler:
+  guidance_scale: 7.5
   num_inference_steps: 50
 
 optimizer:
@@ -25,7 +26,7 @@ scheduler:
     end_factor: 1.0
   
 logging:
-  run_name: 'ddpo_sd_pickscore'
+  run_name: 'ddpo_sd_pickapic_pickscore'
   wandb_entity: 'tmabraham'
   wandb_project: 'DRLX'
 

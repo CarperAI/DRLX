@@ -10,7 +10,7 @@ from drlx.pipeline.imagenet_animal_prompts import ImagenetAnimalPrompts
 
 import torch
 
-config = DRLXConfig.load_yaml("configs/ddpo_sd.yml")
+config = DRLXConfig.load_yaml("configs/ddpo_sd_imagenet.yml")
 
 pipe = ImagenetAnimalPrompts(prefix='', postfix='', num=config.train.num_samples_per_epoch)
 resume = False

@@ -1,17 +1,18 @@
 from drlx.trainer.ddpo_trainer import DDPOTrainer
 from drlx.configs import DRLXConfig
 from drlx.reward_modelling.pickscore import PickScoreModel
+from drlx.reward_modelling.aesthetics import Aesthetics
 from drlx.utils import get_latest_checkpoint
 
 # Pipeline first
-from drlx.pipeline.pickapic_prompts import PickAPicPrompts
+from drlx.pipeline.pickapic_prompts import PickAPicPrompts, PickAPicReplacementPrompts
 
 import torch
 
 pipe = PickAPicPrompts()
 resume = False
 
-config = DRLXConfig.load_yaml("configs/ddpo_sd_pickscore.yml")
+config = DRLXConfig.load_yaml("configs/ddpo_sd_pickapic.yml")
 trainer = DDPOTrainer(config)
 
 if resume:

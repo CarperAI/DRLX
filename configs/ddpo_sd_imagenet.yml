@@ -2,7 +2,7 @@ method:
   name : "DDPO"
 
 model:
-  model_path: "RunwayML/stable-diffusion-v1-5"
+  model_path: "stabilityai/stable-diffusion-2-1-base"
   model_arch_type: "LDMUnet"
   attention_slicing: True
   xformers_memory_efficient: True
@@ -31,7 +31,7 @@ logging:
 
 train:
   num_epochs: 50
-  num_samples_per_epoch: 128
+  num_samples_per_epoch: 256
   batch_size: 4
   sample_batch_size: 32
   grad_clip: 1.0
