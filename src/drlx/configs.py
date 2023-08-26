@@ -132,6 +132,12 @@ class TrainConfig(ConfigClass):
 
     :suppress_log_keywords: List of prefixes for loggers to suppress warnings from during training. Type as single string with different prefixes delimited by commas.
     :type suppress_log_keywords: str
+
+    :param sample_prompts: List of sample prompts to use for fixed sample taken every training step
+    :type sample_prompts: List[str]
+
+    :param save_samples: Save samples locally?
+    :type save_samples: bool
     """
     batch_size: int = 4
     target_batch: int = None
@@ -146,6 +152,7 @@ class TrainConfig(ConfigClass):
     tf32: bool = False
     suppress_log_keywords: str = None
     sample_prompts : List[str] = None
+    save_samples : bool = True
 
 
 @dataclass
@@ -216,6 +223,9 @@ class ModelConfig(ConfigClass):
     :param model_arch_type: Type of model architecture. 
     :type model_arch_type: str
 
+    :param use_safetensors: Use safe tensors when loading pipeline?
+    :type use_safetensors: bool
+
     :param attention_slicing: Whether to use attention slicing
     :type attention_slicing: bool
 
@@ -239,6 +249,7 @@ class ModelConfig(ConfigClass):
 
     model_path: str = None
     model_arch_type: str = None
+    use_safetensors : bool = False
     attention_slicing: bool = False
     xformers_memory_efficient: bool = False 
     gradient_checkpointing: bool = False
