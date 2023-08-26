@@ -5,7 +5,7 @@ from accelerate import Accelerator
 from drlx.configs import DRLXConfig, DDPOConfig
 from drlx.trainer import BaseTrainer
 from drlx.sampling import DDPOSampler
-from drlx.utils import suppress_warnings, Timer, PerPromptStatTracker, scoped_seed
+from drlx.utils import suppress_warnings, Timer, PerPromptStatTracker, scoped_seed, save_images
 
 import torch
 import einops as eo
@@ -326,8 +326,8 @@ class DDPOTrainer(BaseTrainer):
 
             # Consistent prompt sample for logging
             with scoped_seed(self.config.train.seed):
-                sample_imgs, sample_rewards, _, _ = self.sample_and_calculate_rewards(sample_prompts, reward_fn)
-            sample_imgs = [wandb.Image(Image.fromarray(img), caption=prompt + f', {reward.item()}') for img, prompt, reward in zip(sample_imgs, sample_prompts, sample_rewards)]
+                sample_imgs_np, sample_rewards, _, _ = self.sample_and_calculate_rewards(sample_prompts, reward_fn)
+            sample_imgs = [wandb.Image(Image.fromarray(img), caption=prompt + f', {reward.item()}') for img, prompt, reward in zip(sample_imgs_np, sample_prompts, sample_rewards)]
             batch_imgs = [wandb.Image(Image.fromarray(img), caption=prompt) for img, prompt in zip(imgs[-1], all_prompts[-1])]
 
             # Logging
@@ -339,6 +339,11 @@ class DDPOTrainer(BaseTrainer):
                     "img_batch" : batch_imgs,
                     "img_sample" : sample_imgs
                 })
+            # save images
+            if self.accelerator.is_main_process and self.config.train.save_samples:
+                save_images(sample_imgs_np, f"./samples/{self.config.logging.run_name}/{epoch}")
+
+                
 
             # Inner epochs and actual training
             self.accelerator.print("Training...")
@@ -398,7 +403,7 @@ class DDPOTrainer(BaseTrainer):
             os.makedirs(fp, exist_ok = True)
             unwrapped_model = self.accelerator.unwrap_model(self.model)
             self.pipe.unet = unwrapped_model.unet
-            self.pipe.save_pretrained(fp)
+            self.pipe.save_pretrained(fp, safe_serialization = self.unwrapped_model.config.use_safetensors)
         self.accelerator.wait_for_everyone()
 
     def extract_pipeline(self):
