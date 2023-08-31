@@ -227,4 +227,23 @@ def save_images(images : np.array, fp : str):
     for i, image in enumerate(images):
         image.save(os.path.join(fp,f"{i}.png"))
 
+@contextmanager
+def skip_torch_init():
+    """
+    Speeds up model init by skipping default parameters. Only use when you are certain a checkpoint will be loaded.
+    """
+    original_linear_init = torch.nn.Linear.reset_parameters
+    original_norm_init = torch.nn.LayerNorm.reset_parameters
+    original_conv2d_init = torch.nn.Conv2d.reset_parameters
+
+    setattr(torch.nn.Linear, "reset_parameters", lambda self: None)
+    setattr(torch.nn.LayerNorm, "reset_parameters", lambda self: None)
+    setattr(torch.nn.Conv2d, "reset_parameters", lambda self: None)
+
+    try:
+        yield
+    finally:
+        setattr(torch.nn.Linear, "reset_parameters", original_linear_init)
+        setattr(torch.nn.LayerNorm, "reset_parameters", original_norm_init)
+        setattr(torch.nn.Conv2d, "reset_parameters", original_conv2d_init)
 
