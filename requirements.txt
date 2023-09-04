@@ -5,6 +5,7 @@ einops
 diffusers
 transformers
 accelerate
+datasets
 xformers
 wandb
 fastprogress
