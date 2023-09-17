@@ -3,7 +3,7 @@ from typing import Iterable, Tuple, Callable
 
 from accelerate import Accelerator
 from drlx.configs import DRLXConfig, DDPOConfig
-from drlx.trainer import BaseTrainer
+from drlx.trainer.base_accelerate import AcceleratedTrainer
 from drlx.sampling import DDPOSampler
 from drlx.utils import suppress_warnings, Timer, PerPromptStatTracker, scoped_seed, save_images
 
@@ -79,7 +79,7 @@ class DDPOExperienceReplay(Dataset):
 
         return DataLoader(self, collate_fn=collate, **kwargs)
     
-class DDPOTrainer(BaseTrainer):
+class DDPOTrainer(AcceleratedTrainer):
     """ 
     DDPO Accelerated Trainer initilization from config. During init, sets up model, optimizer, sampler and logging
 
@@ -91,53 +91,6 @@ class DDPOTrainer(BaseTrainer):
         super().__init__(config)
 
         assert isinstance(self.config.method, DDPOConfig), "ERROR: Method config must be DDPO config"
-
-        # Figure out batch size and accumulation steps
-        if self.config.train.target_batch is not None: # Just use normal batch_size
-            self.accum_steps = (self.config.train.target_batch // self.config.train.batch_size)
-        else:
-            self.accum_steps = 1
-
-        self.accelerator = Accelerator(
-            log_with = config.logging.log_with,
-            gradient_accumulation_steps = self.accum_steps
-        )
-
-        # Disable tokenizer warnings since they clutter the CLI
-        kw_str = self.config.train.suppress_log_keywords
-        if kw_str is not None:
-            for prefix in kw_str.split(","):
-                suppress_warnings(prefix.strip())
-
-        self.pipe = None # Store reference to pipeline so that we can use save_pretrained later
-        self.model = self.setup_model()
-        self.optimizer = self.setup_optimizer()
-        self.scheduler = self.setup_scheduler()
-
-        self.sampler = self.model.sampler
-        self.model, self.optimizer, self.scheduler = self.accelerator.prepare(
-            self.model, self.optimizer, self.scheduler
-        )
-
-        # Setup tracking
-
-        tracker_kwargs = {}
-        self.use_wandb = not (config.logging.wandb_project is None)
-        if self.use_wandb:
-            log = config.logging
-            tracker_kwargs["wandb"] = {
-                "name" : log.run_name,
-                "entity" : log.wandb_entity,
-                "mode" : "online"
-            }
-
-            self.accelerator.init_trackers(
-                project_name = log.wandb_project,
-                config = config.to_dict(),
-                init_kwargs = tracker_kwargs
-            )
-
-        self.world_size = self.accelerator.state.num_processes
 
     def setup_model(self):
         """
@@ -381,46 +334,3 @@ class DDPOTrainer(BaseTrainer):
             last_epoch_time = time_per_1k(self.config.train.num_samples_per_epoch)
             
             del metrics, dataloader, experience_loader
-
-    def save_checkpoint(self, fp : str, components = None):
-        """
-        Save checkpoint in main process
-
-        :param fp: File path to save checkpoint to
-        """
-        if self.accelerator.is_main_process:
-            os.makedirs(fp, exist_ok = True)
-            self.accelerator.save_state(output_dir=fp)
-        self.accelerator.wait_for_everyone() # need to use this twice or a corrupted state is saved
-
-    def save_pretrained(self, fp : str):
-        """
-        Save model into pretrained pipeline so it can be loaded in pipeline later
-
-        :param fp: File path to save to
-        """
-        if self.accelerator.is_main_process:
-            os.makedirs(fp, exist_ok = True)
-            unwrapped_model = self.accelerator.unwrap_model(self.model)
-            self.pipe.unet = unwrapped_model.unet
-            self.pipe.save_pretrained(fp, safe_serialization = unwrapped_model.config.use_safetensors)
-        self.accelerator.wait_for_everyone()
-
-    def extract_pipeline(self):
-        """
-        Return original pipeline with finetuned denoiser plugged in
-
-        :return: Diffusers pipeline
-        """
-
-        self.pipe.unet = self.accelerator.unwrap_model(self.model).unet
-        return self.pipe
-
-    def load_checkpoint(self, fp : str):
-        """
-        Load checkpoint
-
-        :param fp: File path to checkpoint to load from
-        """
-        self.accelerator.load_state(fp)
-        self.accelerator.print("Succesfully loaded checkpoint")
