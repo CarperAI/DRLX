@@ -26,8 +26,7 @@ scheduler:
     end_factor: 1.0
   
 logging:
-  run_name: 'ddpo_sd_pickapic_pickscore_run_longer'
-  wandb_entity: 'tmabraham'
+  run_name: 'ddpo_sd_pickapic_pickscore'
   wandb_project: 'DRLX'
 
 train:

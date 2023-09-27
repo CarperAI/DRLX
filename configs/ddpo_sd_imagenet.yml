@@ -26,7 +26,6 @@ scheduler:
   
 logging:
   run_name: 'ddpo_sd_imagenet'
-  wandb_entity: 'tmabraham'
   wandb_project: 'DRLX'
 
 train:
