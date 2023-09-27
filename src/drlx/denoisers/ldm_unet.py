@@ -62,7 +62,8 @@ class LDMUNet(BaseConditionalDenoiser):
         :return: an LDMUNet object with UNet, Text Encoder, VAE, tokenizer and scheduler from pretrained pipeline. Also returns the pretrained pipeline in case caller needs it.
         :rtype: LDMUNet
         """
-        pipe = cls.from_pretrained(path, use_safetensors = self.config.use_safetensors)
+
+        pipe = cls.from_pretrained(path, use_safetensors = self.config.use_safetensors, local_files_only = self.config.local_model)
 
         if self.config.attention_slicing: pipe.enable_attention_slicing()
         if self.config.xformers_memory_efficient: pipe.enable_xformers_memory_efficient_attention()

@@ -226,6 +226,9 @@ class ModelConfig(ConfigClass):
     :param use_safetensors: Use safe tensors when loading pipeline?
     :type use_safetensors: bool
 
+    :param local_model: Force model to load checkpoint locally only
+    :type local_model: bool
+
     :param attention_slicing: Whether to use attention slicing
     :type attention_slicing: bool
 
@@ -250,6 +253,7 @@ class ModelConfig(ConfigClass):
     model_path: str = None
     model_arch_type: str = None
     use_safetensors : bool = False
+    local_model : bool = False
     attention_slicing: bool = False
     xformers_memory_efficient: bool = False 
     gradient_checkpointing: bool = False
