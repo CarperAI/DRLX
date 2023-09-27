@@ -2,6 +2,8 @@
 
 DRLX is a library for distributed training of diffusion models via RL. It is meant to wrap around 🤗 Hugging Face's [Diffusers](https://huggingface.co/docs/diffusers/) library and uses [Accelerate](https://huggingface.co/docs/accelerate/) for Multi-GPU and Multi-Node (as of yet untested)
 
+**News (09/27/2023): Check out our blog post with some recent experiments [here](https://carper.ai/enhancing-diffusion-models-with-reinforcement-learning/)!**
+
 📖 **[Documentation](https://DRLX.readthedocs.io)**
 
 # Setup
