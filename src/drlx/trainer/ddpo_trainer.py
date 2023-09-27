@@ -403,7 +403,7 @@ class DDPOTrainer(BaseTrainer):
             os.makedirs(fp, exist_ok = True)
             unwrapped_model = self.accelerator.unwrap_model(self.model)
             self.pipe.unet = unwrapped_model.unet
-            self.pipe.save_pretrained(fp, safe_serialization = self.unwrapped_model.config.use_safetensors)
+            self.pipe.save_pretrained(fp, safe_serialization = unwrapped_model.config.use_safetensors)
         self.accelerator.wait_for_everyone()
 
     def extract_pipeline(self):

@@ -3,7 +3,7 @@ from drlx.configs import DRLXConfig
 import torch
 import os
 
-config = DRLXConfig.load_yaml("configs/ddpo_sd.yml")
+config = DRLXConfig.load_yaml("configs/ddpo_sd_imagenet.yml")
 trainer = DDPOTrainer(config)
 
 fp = "./checkpoints_saving_test"

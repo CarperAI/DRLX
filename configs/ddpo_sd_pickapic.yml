@@ -26,12 +26,12 @@ scheduler:
     end_factor: 1.0
   
 logging:
-  run_name: 'ddpo_sd_pickapic_pickscore'
+  run_name: 'ddpo_sd_pickapic_pickscore_run_longer'
   wandb_entity: 'tmabraham'
   wandb_project: 'DRLX'
 
 train:
-  num_epochs: 500
+  num_epochs: 450
   num_samples_per_epoch: 256
   batch_size: 4
   sample_batch_size: 32
@@ -39,3 +39,4 @@ train:
   checkpoint_interval: 50
   tf32: True
   suppress_log_keywords: "diffusers.pipelines,transformers"
+  save_samples: False
