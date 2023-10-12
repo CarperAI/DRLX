@@ -5,7 +5,14 @@ from accelerate import Accelerator
 from drlx.configs import DRLXConfig, DDPOConfig
 from drlx.trainer import BaseTrainer
 from drlx.sampling import DDPOSampler
-from drlx.utils import suppress_warnings, Timer, PerPromptStatTracker, scoped_seed, save_images
+from drlx.utils import (
+    suppress_warnings,
+    unet_attn_processors_state_dict,
+    Timer,
+    PerPromptStatTracker,
+    scoped_seed,
+    save_images,
+)
 
 import torch
 import einops as eo
@@ -19,32 +26,33 @@ import wandb
 import accelerate.utils
 from PIL import Image
 
+from diffusers.loaders import LoraLoaderMixin
 from diffusers import StableDiffusionPipeline
+
 
 class DDPOExperienceReplay(Dataset):
     """
     Utility class to compute advantages and create dataloader from sampling experiences.
     """
 
-    def __init__(self,
+    def __init__(
+        self,
         accelerator: Accelerator,
-        reward_fn: callable, 
+        reward_fn: callable,
         ppst: PerPromptStatTracker,
-        imgs : Iterable[Iterable], 
-        prompts : Iterable[Iterable[str]], 
-        all_step_preds : Iterable[TensorType["t","b","c","h","w"]],
-        log_probs : Iterable[TensorType["t", "b"]],
-        **dataloader_kwargs
+        imgs: Iterable[Iterable],
+        prompts: Iterable[Iterable[str]],
+        all_step_preds: Iterable[TensorType["t", "b", "c", "h", "w"]],
+        log_probs: Iterable[TensorType["t", "b"]],
+        **dataloader_kwargs,
     ):
         # Compute rewards first
-        rewards = [reward_fn(img_batch, prompt_batch) 
-                    for img_batch, prompt_batch in zip(imgs, prompts)]
-
+        rewards = [reward_fn(img_batch, prompt_batch) for img_batch, prompt_batch in zip(imgs, prompts)]
 
         # Combine all_step_preds, log_probs
-        self.all_step_preds = torch.cat(all_step_preds, dim = 1) # [t, n, c, h, w]
-        self.log_probs = torch.cat(log_probs, dim = 1) # [t, n]
-        self.rewards = torch.cat(rewards) # [n]
+        self.all_step_preds = torch.cat(all_step_preds, dim=1)  # [t, n, c, h, w]
+        self.log_probs = torch.cat(log_probs, dim=1)  # [t, n]
+        self.rewards = torch.cat(rewards)  # [n]
 
         # Gather all rewards
         self.all_rewards = accelerator.gather(self.rewards).detach().cpu().numpy()
@@ -52,16 +60,18 @@ class DDPOExperienceReplay(Dataset):
         # Prompts is list of batches of prompts (list of list of strings)
         # Iterate through each batch and each prompt within it to unwrap into single list of prompts
         self.prompts = [prompt for prompt_list in prompts for prompt in prompt_list]
-        
+
         # Gather all prompts
         self.all_prompts = accelerate.utils.gather_object(self.prompts)
 
         # Compute advantages
         advantages = torch.from_numpy(ppst.update(np.array(self.all_prompts), self.all_rewards)).float()
-        self.advantages = advantages.reshape(accelerator.num_processes, -1)[accelerator.process_index].to(accelerator.device)
-            
+        self.advantages = advantages.reshape(accelerator.num_processes, -1)[accelerator.process_index].to(
+            accelerator.device
+        )
+
     def __getitem__(self, i):
-        return self.all_step_preds[:,i], self.log_probs[:,i], self.advantages[i], self.prompts[i]
+        return self.all_step_preds[:, i], self.log_probs[:, i], self.advantages[i], self.prompts[i]
 
     def __len__(self):
         return self.all_step_preds.size(1)
@@ -70,38 +80,36 @@ class DDPOExperienceReplay(Dataset):
         def collate(batch):
             # unzip the batch
             all_steps, log_probs, advs, prompts = list(zip(*batch))
-            all_steps = torch.stack(all_steps, dim = 1)
-            log_probs = torch.stack(log_probs, dim = 1)
+            all_steps = torch.stack(all_steps, dim=1)
+            log_probs = torch.stack(log_probs, dim=1)
             advs = torch.stack(advs)
             prompts = list(prompts)
 
             return (all_steps, log_probs, advs, prompts)
 
         return DataLoader(self, collate_fn=collate, **kwargs)
-    
+
+
 class DDPOTrainer(BaseTrainer):
-    """ 
+    """
     DDPO Accelerated Trainer initilization from config. During init, sets up model, optimizer, sampler and logging
 
     :param config: DRLX config
     :type config: DRLXConfig
     """
 
-    def __init__(self, config : DRLXConfig):    
+    def __init__(self, config: DRLXConfig):
         super().__init__(config)
 
         assert isinstance(self.config.method, DDPOConfig), "ERROR: Method config must be DDPO config"
 
         # Figure out batch size and accumulation steps
-        if self.config.train.target_batch is not None: # Just use normal batch_size
-            self.accum_steps = (self.config.train.target_batch // self.config.train.batch_size)
+        if self.config.train.target_batch is not None:  # Just use normal batch_size
+            self.accum_steps = self.config.train.target_batch // self.config.train.batch_size
         else:
             self.accum_steps = 1
 
-        self.accelerator = Accelerator(
-            log_with = config.logging.log_with,
-            gradient_accumulation_steps = self.accum_steps
-        )
+        self.accelerator = Accelerator(log_with=config.logging.log_with, gradient_accumulation_steps=self.accum_steps)
 
         # Disable tokenizer warnings since they clutter the CLI
         kw_str = self.config.train.suppress_log_keywords
@@ -109,10 +117,13 @@ class DDPOTrainer(BaseTrainer):
             for prefix in kw_str.split(","):
                 suppress_warnings(prefix.strip())
 
-        self.pipe = None # Store reference to pipeline so that we can use save_pretrained later
+        self.pipe = None  # Store reference to pipeline so that we can use save_pretrained later
         self.model = self.setup_model()
         self.optimizer = self.setup_optimizer()
         self.scheduler = self.setup_scheduler()
+
+        self.accelerator.register_load_state_pre_hook(self._save_model_hook)
+        self.accelerator.register_load_state_pre_hook(self._load_model_hook)
 
         self.sampler = self.model.sampler
         self.model, self.optimizer, self.scheduler = self.accelerator.prepare(
@@ -125,16 +136,10 @@ class DDPOTrainer(BaseTrainer):
         self.use_wandb = not (config.logging.wandb_project is None)
         if self.use_wandb:
             log = config.logging
-            tracker_kwargs["wandb"] = {
-                "name" : log.run_name,
-                "entity" : log.wandb_entity,
-                "mode" : "online"
-            }
+            tracker_kwargs["wandb"] = {"name": log.run_name, "entity": log.wandb_entity, "mode": "online"}
 
             self.accelerator.init_trackers(
-                project_name = log.wandb_project,
-                config = config.to_dict(),
-                init_kwargs = tracker_kwargs
+                project_name=log.wandb_project, config=config.to_dict(), init_kwargs=tracker_kwargs
             )
 
         self.world_size = self.accelerator.state.num_processes
@@ -143,19 +148,49 @@ class DDPOTrainer(BaseTrainer):
         """
         Set up model from config.
         """
-        model = self.get_arch(self.config)(self.config.model, sampler = DDPOSampler(self.config.sampler))
+        model = self.get_arch(self.config)(self.config.model, sampler=DDPOSampler(self.config.sampler))
         if self.config.model.model_path is not None:
             model, pipe = model.from_pretrained_pipeline(StableDiffusionPipeline, self.config.model.model_path)
 
-        self.pipe = pipe            
+        self.pipe = pipe
         return model
+
+    # create custom saving & loading hooks so that `accelerator.save_state(...)` serializes in a nice format
+    def _save_model_hook(self, models, weights, output_dir):
+        # there are only two options here. Either are just the unet attn processor layers
+        # or there are the unet and text encoder atten layers
+        unet_lora_layers_to_save = None
+
+        for model in models:  # only doing unet not text encoder
+            if isinstance(model, type(self.accelerator.unwrap_model(self.model.unet))):
+                unet_lora_layers_to_save = unet_attn_processors_state_dict(model)
+            else:
+                raise ValueError(f"unexpected save model: {model.__class__}")
+            # make sure to pop weight so that corresponding model is not saved again
+            weights.pop()
+
+        LoraLoaderMixin.save_lora_weights(output_dir, unet_lora_layers=unet_lora_layers_to_save)
+
+    def _load_model_hook(self, models, input_dir):
+        unet_ = None
+
+        while len(models) > 0:
+            model = models.pop()
+
+            if isinstance(model, type(self.accelerator.unwrap_model(self.model.unet))):
+                unet_ = model
+            else:
+                raise ValueError(f"unexpected save model: {model.__class__}")
+
+        lora_state_dict, network_alphas = LoraLoaderMixin.lora_state_dict(input_dir)
+        LoraLoaderMixin.load_lora_into_unet(lora_state_dict, network_alphas=network_alphas, unet=unet_)
 
     def loss(
         self,
-        x_t : TensorType["timesteps", "batch", "channels", "height", "width"],
-        log_probs_t : TensorType["timesteps", "batch"], 
-        advantages : TensorType["batch"],
-        prompts : Iterable[str]
+        x_t: TensorType["timesteps", "batch", "channels", "height", "width"],
+        log_probs_t: TensorType["timesteps", "batch"],
+        advantages: TensorType["batch"],
+        prompts: Iterable[str],
     ):
         """
         Get loss for training
@@ -184,10 +219,10 @@ class DDPOTrainer(BaseTrainer):
             old_log_probs=log_probs_t,
             show_progress=self.accelerator.is_main_process,
             method_config=self.config.method,
-            accelerator=self.accelerator
+            accelerator=self.accelerator,
         )
-    
-    def sample(self, prompts : Iterable[str]) -> Tuple[torch.Tensor]:
+
+    def sample(self, prompts: Iterable[str]) -> Tuple[torch.Tensor]:
         """
         Sample predictions, predictions at time steps and log probabilities from sampler
 
@@ -198,15 +233,12 @@ class DDPOTrainer(BaseTrainer):
         :rtype: Tuple[torch.Tensor]
         """
         preds, all_preds, log_probs = self.sampler.sample(
-            prompts = prompts,
-            denoiser = self.model,
-            device = self.accelerator.device,
-            accelerator = self.accelerator
+            prompts=prompts, denoiser=self.model, device=self.accelerator.device, accelerator=self.accelerator
         )
 
         return preds, all_preds, log_probs
 
-    def sample_and_calculate_rewards(self, prompts : Iterable[str], reward_fn : Callable) -> Tuple:
+    def sample_and_calculate_rewards(self, prompts: Iterable[str], reward_fn: Callable) -> Tuple:
         """
         Samples a batch of images and calculates the rewards for each image
 
@@ -225,7 +257,7 @@ class DDPOTrainer(BaseTrainer):
 
         rewards = reward_fn(imgs, prompts).to(self.accelerator.device)
         return imgs, rewards, all_preds, log_probs
-    
+
     def train(self, prompt_pipeline, reward_fn):
         """
         Trains the model based on config parameters. Needs to be passed a prompt pipeline and reward function.
@@ -244,7 +276,7 @@ class DDPOTrainer(BaseTrainer):
         # This sample batch is dependent on config seed so it can be same across runs
         with scoped_seed(self.config.train.seed):
             dataloader = self.accelerator.prepare(
-                prompt_pipeline.create_train_loader(batch_size = self.config.train.batch_size, shuffle = False)
+                prompt_pipeline.create_train_loader(batch_size=self.config.train.batch_size, shuffle=False)
             )
             sample_prompts = self.config.train.sample_prompts
             if sample_prompts is None:
@@ -252,7 +284,7 @@ class DDPOTrainer(BaseTrainer):
             if len(sample_prompts) < self.config.train.batch_size:
                 new_sample_prompts = next(iter(dataloader))
                 sample_prompts += new_sample_prompts
-                sample_prompts = sample_prompts[:self.config.train.batch_size]
+                sample_prompts = sample_prompts[: self.config.train.batch_size]
 
         assert isinstance(self.sampler, DDPOSampler), "Error: Model Sampler for DDPO training must be DDPO sampler"
 
@@ -268,7 +300,8 @@ class DDPOTrainer(BaseTrainer):
 
         # Timer to measure time per 1k images (as metric)
         timer = Timer()
-        def time_per_1k(n_samples : int):
+
+        def time_per_1k(n_samples: int):
             total_time = timer.hit()
             return total_time * 1000 / n_samples
 
@@ -278,28 +311,35 @@ class DDPOTrainer(BaseTrainer):
         accum = 0
         last_epoch_time = timer.hit()
         for epoch in range(outer_epochs):
-
             # Clean up unused resources
             preds, all_step_preds, log_probs, all_prompts = [], [], [], []
-            self.accelerator._dataloaders = [] # Clear dataloaders
+            self.accelerator._dataloaders = []  # Clear dataloaders
             gc.collect()
             torch.cuda.empty_cache()
 
-            self.accelerator.print(f"Epoch {epoch}/{outer_epochs}. {epoch * self.config.train.num_samples_per_epoch} samples seen. Averaging {last_epoch_time:.2f}s/1k samples.")
-            
+            self.accelerator.print(
+                f"Epoch {epoch}/{outer_epochs}. {epoch * self.config.train.num_samples_per_epoch} samples seen. Averaging {last_epoch_time:.2f}s/1k samples."
+            )
+
             # Make a new dataloader to reshuffle data
-            dataloader = prompt_pipeline.create_train_loader(batch_size = self.config.train.sample_batch_size, shuffle = True)
+            dataloader = prompt_pipeline.create_train_loader(
+                batch_size=self.config.train.sample_batch_size, shuffle=True
+            )
             dataloader = self.accelerator.prepare(dataloader)
-            
+
             # Sample (play the game)
-            data_steps = self.config.train.num_samples_per_epoch // self.config.train.sample_batch_size // self.world_size
+            data_steps = (
+                self.config.train.num_samples_per_epoch // self.config.train.sample_batch_size // self.world_size
+            )
             self.accelerator.print("Sampling...")
-            for i, prompts in enumerate(tqdm(dataloader, total = data_steps, disable=not self.accelerator.is_main_process)):            
+            for i, prompts in enumerate(
+                tqdm(dataloader, total=data_steps, disable=not self.accelerator.is_main_process)
+            ):
                 if i >= data_steps:
                     break
 
                 batch_preds, batch_all_step_preds, batch_log_probs = self.sample(prompts)
-                
+
                 preds.append(batch_preds)
                 all_step_preds.append(batch_all_step_preds)
                 log_probs.append(batch_log_probs)
@@ -313,60 +353,67 @@ class DDPOTrainer(BaseTrainer):
             # Experience replay computes normalized rewards,
             # then is used to create a loader for training
             exp_replay = DDPOExperienceReplay(
-                self.accelerator,
-                reward_fn, per_prompt_stat_tracker,
-                imgs, all_prompts,
-                all_step_preds, log_probs
+                self.accelerator, reward_fn, per_prompt_stat_tracker, imgs, all_prompts, all_step_preds, log_probs
             )
             all_rewards = self.accelerator.gather(exp_replay.rewards).detach().cpu().numpy()
 
-            experience_loader = exp_replay.create_loader(batch_size = self.config.train.batch_size)
+            experience_loader = exp_replay.create_loader(batch_size=self.config.train.batch_size)
 
             mean_rewards.append(all_rewards.mean().item())
 
             # Consistent prompt sample for logging
             with scoped_seed(self.config.train.seed):
                 sample_imgs_np, sample_rewards, _, _ = self.sample_and_calculate_rewards(sample_prompts, reward_fn)
-            sample_imgs = [wandb.Image(Image.fromarray(img), caption=prompt + f', {reward.item()}') for img, prompt, reward in zip(sample_imgs_np, sample_prompts, sample_rewards)]
-            batch_imgs = [wandb.Image(Image.fromarray(img), caption=prompt) for img, prompt in zip(imgs[-1], all_prompts[-1])]
+            sample_imgs = [
+                wandb.Image(Image.fromarray(img), caption=prompt + f", {reward.item()}")
+                for img, prompt, reward in zip(sample_imgs_np, sample_prompts, sample_rewards)
+            ]
+            batch_imgs = [
+                wandb.Image(Image.fromarray(img), caption=prompt) for img, prompt in zip(imgs[-1], all_prompts[-1])
+            ]
 
             # Logging
             if self.use_wandb:
-                self.accelerator.log({
-                    "mean_reward" : mean_rewards[-1],
-                    "reward_hist" : wandb.Histogram(all_rewards),
-                    "time_per_1k" : last_epoch_time,
-                    "img_batch" : batch_imgs,
-                    "img_sample" : sample_imgs
-                })
+                self.accelerator.log(
+                    {
+                        "mean_reward": mean_rewards[-1],
+                        "reward_hist": wandb.Histogram(all_rewards),
+                        "time_per_1k": last_epoch_time,
+                        "img_batch": batch_imgs,
+                        "img_sample": sample_imgs,
+                    }
+                )
             # save images
             if self.accelerator.is_main_process and self.config.train.save_samples:
                 save_images(sample_imgs_np, f"./samples/{self.config.logging.run_name}/{epoch}")
 
-                
-
             # Inner epochs and actual training
             self.accelerator.print("Training...")
             experience_loader = self.accelerator.prepare(experience_loader)
-            # Inner epochs normally one, disable progress bar when this is the case 
-            for inner_epoch in tqdm(range(self.config.method.num_inner_epochs),
-                disable=(not self.accelerator.is_main_process) or (self.config.method.num_inner_epochs == 1)
+            # Inner epochs normally one, disable progress bar when this is the case
+            for inner_epoch in tqdm(
+                range(self.config.method.num_inner_epochs),
+                disable=(not self.accelerator.is_main_process) or (self.config.method.num_inner_epochs == 1),
             ):
-                for (all_step_preds, log_probs, advantages, prompts) in tqdm(experience_loader, disable=not self.accelerator.is_main_process):
-                    with self.accelerator.accumulate(self.model): # Accumulate across minibatches
+                for all_step_preds, log_probs, advantages, prompts in tqdm(
+                    experience_loader, disable=not self.accelerator.is_main_process
+                ):
+                    with self.accelerator.accumulate(self.model):  # Accumulate across minibatches
                         metrics = self.loss(all_step_preds, log_probs, advantages, prompts)
                         self.accelerator.clip_grad_norm_(self.model.parameters(), self.config.train.grad_clip)
                         self.optimizer.step()
                         self.scheduler.step()
                         self.optimizer.zero_grad()
                         if self.use_wandb:
-                            self.accelerator.log({ #TODO: add approx_kl tracking
-                                "loss" : metrics["loss"],
-                                "kl_div" : metrics["kl_div"],
-                                "clip_frac" : metrics["clip_frac"], 
-                                "lr" : self.scheduler.get_last_lr()[0],
-                                "epoch": epoch
-                            })
+                            self.accelerator.log(
+                                {  # TODO: add approx_kl tracking
+                                    "loss": metrics["loss"],
+                                    "kl_div": metrics["kl_div"],
+                                    "clip_frac": metrics["clip_frac"],
+                                    "lr": self.scheduler.get_last_lr()[0],
+                                    "epoch": epoch,
+                                }
+                            )
 
             # Save model every [interval] epochs
             accum += 1
@@ -379,31 +426,31 @@ class DDPOTrainer(BaseTrainer):
                 self.save_pretrained(output_path)
 
             last_epoch_time = time_per_1k(self.config.train.num_samples_per_epoch)
-            
+
             del metrics, dataloader, experience_loader
 
-    def save_checkpoint(self, fp : str, components = None):
+    def save_checkpoint(self, fp: str, components=None):
         """
         Save checkpoint in main process
 
         :param fp: File path to save checkpoint to
         """
         if self.accelerator.is_main_process:
-            os.makedirs(fp, exist_ok = True)
+            os.makedirs(fp, exist_ok=True)
             self.accelerator.save_state(output_dir=fp)
-        self.accelerator.wait_for_everyone() # need to use this twice or a corrupted state is saved
+        self.accelerator.wait_for_everyone()  # need to use this twice or a corrupted state is saved
 
-    def save_pretrained(self, fp : str):
+    def save_pretrained(self, fp: str):
         """
         Save model into pretrained pipeline so it can be loaded in pipeline later
 
         :param fp: File path to save to
         """
         if self.accelerator.is_main_process:
-            os.makedirs(fp, exist_ok = True)
+            os.makedirs(fp, exist_ok=True)
             unwrapped_model = self.accelerator.unwrap_model(self.model)
             self.pipe.unet = unwrapped_model.unet
-            self.pipe.save_pretrained(fp, safe_serialization = unwrapped_model.config.use_safetensors)
+            self.pipe.save_pretrained(fp, safe_serialization=unwrapped_model.config.use_safetensors)
         self.accelerator.wait_for_everyone()
 
     def extract_pipeline(self):
@@ -416,7 +463,7 @@ class DDPOTrainer(BaseTrainer):
         self.pipe.unet = self.accelerator.unwrap_model(self.model).unet
         return self.pipe
 
-    def load_checkpoint(self, fp : str):
+    def load_checkpoint(self, fp: str):
         """
         Load checkpoint
 

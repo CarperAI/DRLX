@@ -8,12 +8,12 @@ import yaml
 @dataclass
 class ConfigClass:
     @classmethod
-    def from_dict(cls, cfg : Dict[str, Any]):
+    def from_dict(cls, cfg: Dict[str, Any]):
         return cls(**cfg)
 
     def to_dict(self):
         return asdict(self)
-    
+
 
 # specifies a dictionary of method configs
 _METHODS: Dict[str, Any] = {}  # registry
@@ -40,6 +40,7 @@ def register_method(name):
 
     return cls
 
+
 @dataclass
 @register_method
 class MethodConfig(ConfigClass):
@@ -52,6 +53,7 @@ class MethodConfig(ConfigClass):
 
     name: str = None
 
+
 def get_method(name: str) -> MethodConfig:
     """
     Return constructor for specified method config
@@ -61,13 +63,14 @@ def get_method(name: str) -> MethodConfig:
         return _METHODS[name]
     else:
         raise Exception("Error: Trying to access a method that has not been registered")
-   
+
+
 @register_method("DDPO")
 @dataclass
 class DDPOConfig(MethodConfig):
     """
     Config for DDPO-related hyperparameters including per prompt stat tracker
-    
+
     :param clip_advantages: Maximum absolute value of advantages
     :type clip_advantages: float
 
@@ -84,13 +87,15 @@ class DDPOConfig(MethodConfig):
         calculating statistics
     :type min_count: int
     """
-    name : str = "DDPO"
+
+    name: str = "DDPO"
     clip_advantages: float = 10.0
     clip_ratio: float = 1e-4
     num_inner_epochs: int = 1
 
-    buffer_size: int = 32 # Set to None to avoid using per prompt stat tracker
+    buffer_size: int = 32  # Set to None to avoid using per prompt stat tracker
     min_count: int = 16
+
 
 @dataclass
 class TrainConfig(ConfigClass):
@@ -139,6 +144,7 @@ class TrainConfig(ConfigClass):
     :param save_samples: Save samples locally?
     :type save_samples: bool
     """
+
     batch_size: int = 4
     target_batch: int = None
     sample_batch_size: int = 8
@@ -151,8 +157,8 @@ class TrainConfig(ConfigClass):
     seed: int = 0
     tf32: bool = False
     suppress_log_keywords: str = None
-    sample_prompts : List[str] = None
-    save_samples : bool = True
+    sample_prompts: List[str] = None
+    save_samples: bool = True
 
 
 @dataclass
@@ -172,12 +178,12 @@ class LoggingConfig(ConfigClass):
     :param wandb_project: Name of the wandb project to log to
     :type wandb_project: str
     """
-    log_with: str = "wandb" # "wandb" or "tensorboard"
+
+    log_with: str = "wandb"  # "wandb" or "tensorboard"
     log_dir: str = None
-    run_name: str = 'ddpo_exp'
+    run_name: str = "ddpo_exp"
     wandb_entity: str = None
     wandb_project: str = None
-
 
 
 @dataclass
@@ -220,7 +226,7 @@ class ModelConfig(ConfigClass):
     :param model_path: Path or name of the model (local or on huggingface hub)
     :type model_path: str
 
-    :param model_arch_type: Type of model architecture. 
+    :param model_arch_type: Type of model architecture.
     :type model_arch_type: str
 
     :param use_safetensors: Use safe tensors when loading pipeline?
@@ -248,30 +254,38 @@ class ModelConfig(ConfigClass):
 
         (parameter-efficient fine-tuning was previously done in trlx with OpenDelta, but it is no longer supported)
     :type peft_config: Union[peft.PeftConfig, Dict[str, Any]]
+
+    :param use_lora: Whether to use LoRA
+    :type use_lora: bool
+
+    :param lora_rank: Rank of LoRA
+    :type lora_rank: int
     """
 
     model_path: str = None
     model_arch_type: str = None
-    use_safetensors : bool = False
-    local_model : bool = False
+    use_safetensors: bool = False
+    local_model: bool = False
     attention_slicing: bool = False
-    xformers_memory_efficient: bool = False 
+    xformers_memory_efficient: bool = False
     gradient_checkpointing: bool = False
-    peft_config: Dict[str, Any] = field(default_factory=dict) # TODO: add PEFT support
-
+    peft_config: Dict[str, Any] = field(default_factory=dict)  # TODO: add PEFT support
+    use_lora: bool = False
+    lora_rank: int = 4
 
 
 @dataclass
 class SamplerConfig(ConfigClass):
-    guidance_scale : float = 5.0 # if guidance is being used
-    guidance_rescale : float = None # see https://arxiv.org/pdf/2305.08891.pdf
-    num_inference_steps : int = 50
-    eta : float = 1
-    postprocess : bool = False # If true, post processes latents to images (uint8 np arrays)
-    img_size : int = 512
+    guidance_scale: float = 5.0  # if guidance is being used
+    guidance_rescale: float = None  # see https://arxiv.org/pdf/2305.08891.pdf
+    num_inference_steps: int = 50
+    eta: float = 1
+    postprocess: bool = False  # If true, post processes latents to images (uint8 np arrays)
+    img_size: int = 512
 
-def load_yaml(yml_fp : str) -> Dict[str, ConfigClass]:
-    with open(yml_fp, mode = 'r') as file:
+
+def load_yaml(yml_fp: str) -> Dict[str, ConfigClass]:
+    with open(yml_fp, mode="r") as file:
         config = yaml.safe_load(file)
     d = {}
     if config["model"]:
@@ -280,7 +294,7 @@ def load_yaml(yml_fp : str) -> Dict[str, ConfigClass]:
         d["train"] = TrainConfig.from_dict(config["train"])
     if config["sampler"]:
         d["sampler"] = SamplerConfig.from_dict(config["sampler"])
-    
+
     return d
 
 
@@ -295,6 +309,7 @@ def merge(base: Dict, update: Dict, updated: Set) -> Dict:
             updated.add(k)
 
     return base
+
 
 @dataclass
 class DRLXConfig(ConfigClass):
@@ -351,7 +366,7 @@ class DRLXConfig(ConfigClass):
             "optimizer": self.optimizer.__dict__,
             "scheduler": self.scheduler.__dict__,
             "train": self.train.__dict__,
-            "logging": self.logging.__dict__
+            "logging": self.logging.__dict__,
         }
 
         return data

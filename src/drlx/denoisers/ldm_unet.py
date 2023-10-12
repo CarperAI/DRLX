@@ -4,10 +4,19 @@ from typing import Iterable, Union, Callable, Type, Tuple
 import torch
 import numpy as np
 from diffusers import UNet2DConditionModel, DDIMScheduler
+from diffusers.models.attention_processor import (
+    AttnAddedKVProcessor,
+    AttnAddedKVProcessor2_0,
+    LoRAAttnAddedKVProcessor,
+    LoRAAttnProcessor,
+    LoRAAttnProcessor2_0,
+    SlicedAttnAddedKVProcessor,
+)
 
 from drlx.denoisers import BaseConditionalDenoiser
 from drlx.configs import ModelConfig, SamplerConfig
 from drlx.sampling import Sampler
+
 
 class LDMUNet(BaseConditionalDenoiser):
     """
@@ -22,13 +31,14 @@ class LDMUNet(BaseConditionalDenoiser):
     :param sampler: Can be provided as alternative to sampler_config (also optional). If neither are provided, a default sampler will be used.
     :type sampler: Sampler
     """
-    def __init__(self, config : ModelConfig, sampler_config : SamplerConfig = None, sampler : Sampler = None):
+
+    def __init__(self, config: ModelConfig, sampler_config: SamplerConfig = None, sampler: Sampler = None):
         super().__init__(config, sampler_config, sampler)
 
-        self.unet : UNet2DConditionModel = None
+        self.unet: UNet2DConditionModel = None
         self.text_encoder = None
         self.vae = None
-        self.encode_prompt : Callable = None
+        self.encode_prompt: Callable = None
 
         self.tokenizer = None
         self.scheduler = None
@@ -48,8 +58,8 @@ class LDMUNet(BaseConditionalDenoiser):
         sample_size = self.sampler.config.img_size // self.scale_factor
 
         return (in_channels, sample_size, sample_size)
-    
-    def from_pretrained_pipeline(self, cls : Type, path : str):
+
+    def from_pretrained_pipeline(self, cls: Type, path: str):
         """
         Get unet from some pretrained model pipeline
 
@@ -63,10 +73,14 @@ class LDMUNet(BaseConditionalDenoiser):
         :rtype: LDMUNet
         """
 
-        pipe = cls.from_pretrained(path, use_safetensors = self.config.use_safetensors, local_files_only = self.config.local_model)
+        pipe = cls.from_pretrained(
+            path, use_safetensors=self.config.use_safetensors, local_files_only=self.config.local_model
+        )
 
-        if self.config.attention_slicing: pipe.enable_attention_slicing()
-        if self.config.xformers_memory_efficient: pipe.enable_xformers_memory_efficient_attention()
+        if self.config.attention_slicing:
+            pipe.enable_attention_slicing()
+        if self.config.xformers_memory_efficient:
+            pipe.enable_xformers_memory_efficient_attention()
 
         self.unet = pipe.unet
         self.text_encoder = pipe.text_encoder
@@ -76,18 +90,48 @@ class LDMUNet(BaseConditionalDenoiser):
 
         self.text_encoder.requires_grad_(False)
         self.vae.requires_grad_(False)
+        self.unet.requires_grad_(not self.config.use_lora)
 
         self.tokenizer = pipe.tokenizer
         self.scheduler = DDIMScheduler.from_config(pipe.scheduler.config)
 
-        if self.config.gradient_checkpointing: self.unet.enable_gradient_checkpointing()
+        if self.config.gradient_checkpointing:
+            self.unet.enable_gradient_checkpointing()
+
+        if self.config.use_lora:
+            # Set correct lora layers
+            unet_lora_attn_procs = {}
+            for name, attn_processor in self.unet.attn_processors.items():
+                cross_attention_dim = None if name.endswith("attn1.processor") else self.unet.config.cross_attention_dim
+                if name.startswith("mid_block"):
+                    hidden_size = self.unet.config.block_out_channels[-1]
+                elif name.startswith("up_blocks"):
+                    block_id = int(name[len("up_blocks.")])
+                    hidden_size = list(reversed(self.unet.config.block_out_channels))[block_id]
+                elif name.startswith("down_blocks"):
+                    block_id = int(name[len("down_blocks.")])
+                    hidden_size = self.unet.config.block_out_channels[block_id]
+
+                if isinstance(attn_processor, (AttnAddedKVProcessor, SlicedAttnAddedKVProcessor, AttnAddedKVProcessor2_0)):
+                    lora_attn_processor_class = LoRAAttnAddedKVProcessor
+                else:
+                    lora_attn_processor_class = (
+                        LoRAAttnProcessor2_0 if hasattr(F, "scaled_dot_product_attention") else LoRAAttnProcessor
+                    )
+
+                module = lora_attn_processor_class(
+                    hidden_size=hidden_size, cross_attention_dim=cross_attention_dim, rank=self.config.lora_rank
+                )
+                module.requires_grad_(True)
+                unet_lora_attn_procs[name] = module
+            self.unet.set_attn_processor(unet_lora_attn_procs)
 
         return self, pipe
-    
-    def preprocess(self, text : Iterable[str], mode = "tokens", **embed_kwargs):
+
+    def preprocess(self, text: Iterable[str], mode="tokens", **embed_kwargs):
         """
         Preprocess text input, either into tokens or into embeddings.
-        
+
         :param mode: Either "tokens" or "embeds"
         :type mode: str
 
@@ -101,39 +145,39 @@ class LDMUNet(BaseConditionalDenoiser):
         if mode == "tokens":
             tok_out = self.tokenizer(
                 text,
-                padding = 'max_length',
-                max_length = self.tokenizer.model_max_length,
-                truncation = True,
-                return_tensors = "pt"
+                padding="max_length",
+                max_length=self.tokenizer.model_max_length,
+                truncation=True,
+                return_tensors="pt",
             )
             return tok_out.input_ids, tok_out.attention_mask
         elif mode == "embeds":
             return self.encode_prompt(text, **embed_kwargs)
-        else: 
+        else:
             raise ValueError("Invalid mode specified for preprocessing")
 
     @torch.no_grad()
-    def postprocess(self, output : TensorType["batch", "channels", "height", "width"], vae_device = None):
+    def postprocess(self, output: TensorType["batch", "channels", "height", "width"], vae_device=None):
         """
-        Post process 
+        Post process
         """
         if vae_device is not None:
             self.vae = self.vae.to(vae_device)
             output = output.to(vae_device)
         images = self.vae.decode(1 / 0.18215 * output).sample
         images = (images / 2 + 0.5).clamp(0, 1)
-        images = images.detach().cpu().permute(0,2,3,1).numpy()
+        images = images.detach().cpu().permute(0, 2, 3, 1).numpy()
         images = (images * 255).round().astype(np.uint8)
         return images
 
     def forward(
-            self,
-            pixel_values : TensorType["batch", "channels", "height", "width"],
-            time_step : Union[TensorType["batch"], int], # Note diffusers tyically does 999->0 as steps
-            input_ids : TensorType["batch", "seq_len"] = None,
-            attention_mask : TensorType["batch", "seq_len"] = None,
-            text_embeds : TensorType["batch", "d"] = None
-        ) -> TensorType["batch", "channels", "height", "width"]:
+        self,
+        pixel_values: TensorType["batch", "channels", "height", "width"],
+        time_step: Union[TensorType["batch"], int],  # Note diffusers tyically does 999->0 as steps
+        input_ids: TensorType["batch", "seq_len"] = None,
+        attention_mask: TensorType["batch", "seq_len"] = None,
+        text_embeds: TensorType["batch", "d"] = None,
+    ) -> TensorType["batch", "channels", "height", "width"]:
         """
         For text conditioned UNET, inputs are assumed to be:
         pixel_values, input_ids, attention_mask, time_step
@@ -142,11 +186,4 @@ class LDMUNet(BaseConditionalDenoiser):
             if text_embeds is None:
                 text_embeds = self.text_encoder(input_ids, attention_mask)[0]
 
-        return self.unet(
-            pixel_values,
-            time_step,
-            encoder_hidden_states = text_embeds
-        ).sample
-    
-
-        
+        return self.unet(pixel_values, time_step, encoder_hidden_states=text_embeds).sample
