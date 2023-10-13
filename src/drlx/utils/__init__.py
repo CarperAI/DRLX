@@ -14,6 +14,7 @@ from PIL import Image
 
 import numpy as np
 
+
 class OptimizerName(str, Enum):
     """Supported optimizer names"""
 
@@ -80,10 +81,11 @@ def get_scheduler_class(name: SchedulerName):
     raise ValueError(f"`{name}` is not a supported scheduler. " f"Supported schedulers are: {supported_schedulers}")
 
 
-
 class DiffusionPipelineName(str, Enum):
     """Supported diffusion pipeline names"""
+
     StableDiffusion = "stable_diffusion"
+
 
 def get_diffusion_pipeline_class(name: DiffusionPipelineName):
     """
@@ -92,7 +94,11 @@ def get_diffusion_pipeline_class(name: DiffusionPipelineName):
     if name == DiffusionPipelineName.StableDiffusion:
         return StableDiffusionPipeline
     supported_diffusion_pipelines = [d.value for d in DiffusionPipelineName]
-    raise ValueError(f"`{name}` is not a supported diffusion pipeline. " f"Supported diffusion pipelines are: {supported_diffusion_pipelines}")
+    raise ValueError(
+        f"`{name}` is not a supported diffusion pipeline. "
+        f"Supported diffusion pipelines are: {supported_diffusion_pipelines}"
+    )
+
 
 def any_chunk(x, chunk_size):
     """
@@ -100,10 +106,11 @@ def any_chunk(x, chunk_size):
     """
     is_tensor = isinstance(x, torch.Tensor)
 
-    x_chunks = [x[i:i+chunk_size] for i in range(0, len(x), chunk_size)]
+    x_chunks = [x[i : i + chunk_size] for i in range(0, len(x), chunk_size)]
     return torch.stack(x_chunks) if is_tensor else x_chunks
 
-def suppress_warnings(prefix : str):
+
+def suppress_warnings(prefix: str):
     """
     With logging module, suppresses any warnings that are coming from a logger
     with a given prefix
@@ -113,11 +120,13 @@ def suppress_warnings(prefix : str):
     names = list(filter(lambda x: x.startswith(prefix), names))
     for name in names:
         logging.getLogger(name).setLevel(logging.ERROR)
-    
+
+
 class Timer:
     """
     Utility class for timing models
     """
+
     def __init__(self):
         self.time = time.time()
 
@@ -130,20 +139,22 @@ class Timer:
         self.time = new_time
         return res
 
+
 def get_latest_checkpoint(checkpoint_root):
     """
     Assume folder root_dir stores checkpoints for model, all named numerically (in terms of training steps associated with said checkpoints).
     This function returns the path to the latest checkpoint, aka the subfolder with largest numerical name. Returns none if the root dir is empty
     """
-    subdirs = glob.glob(os.path.join(checkpoint_root, '*'))
+    subdirs = glob.glob(os.path.join(checkpoint_root, "*"))
     if not subdirs:
         return None
-    
+
     # Filter out any paths that are not directories or are not numeric
     subdirs = [s for s in subdirs if os.path.isdir(s) and os.path.basename(s).isdigit()]
     # Find the maximum directory number (assuming all subdirectories are numeric)
     latest_checkpoint = max(subdirs, key=lambda s: int(os.path.basename(s)))
     return latest_checkpoint
+
 
 class PerPromptStatTracker:
     """
@@ -155,7 +166,8 @@ class PerPromptStatTracker:
     :param min_count: How many duplicates for a prompt minimum before we average over that prompt and not over all prompts
     :type min_count: int
     """
-    def __init__(self, buffer_size : int, min_count : int):
+
+    def __init__(self, buffer_size: int, min_count: int):
         self.buffer_size = buffer_size
         self.min_count = min_count
         self.stats = {}
@@ -178,7 +190,8 @@ class PerPromptStatTracker:
             advantages[prompts == prompt] = (prompt_rewards - mean) / std
 
         return advantages
-    
+
+
 def unet_attn_processors_state_dict(unet) -> Dict[str, torch.tensor]:
     """
     Returns:
@@ -194,7 +207,6 @@ def unet_attn_processors_state_dict(unet) -> Dict[str, torch.tensor]:
 
     return attn_processors_state_dict
 
-def create_lora_layers(model)
 
 def rescale_noise_cfg(noise_cfg, noise_pred_text, guidance_rescale=0.0):
     """
@@ -209,8 +221,9 @@ def rescale_noise_cfg(noise_cfg, noise_pred_text, guidance_rescale=0.0):
     noise_cfg = guidance_rescale * noise_pred_rescaled + (1 - guidance_rescale) * noise_cfg
     return noise_cfg
 
+
 @contextmanager
-def scoped_seed(seed : int = 0):
+def scoped_seed(seed: int = 0):
     """
     Set torch seed within a context. Useful for deterministic sampling.
 
@@ -221,10 +234,10 @@ def scoped_seed(seed : int = 0):
     cpu_rng_state = torch.get_rng_state()
     if torch.cuda.is_available():
         cuda_rng_state = torch.cuda.get_rng_state()
-    
+
     # Set the desired seed
     torch.manual_seed(seed)
-    
+
     try:
         yield
     finally:
@@ -233,15 +246,14 @@ def scoped_seed(seed : int = 0):
         if torch.cuda.is_available():
             torch.cuda.set_rng_state(cuda_rng_state)
 
-def save_images(images : np.array, fp : str):
+
+def save_images(images: np.array, fp: str):
     """
     Saves images to folder designated by fp
     """
 
-    os.makedirs(fp, exist_ok = True)
+    os.makedirs(fp, exist_ok=True)
 
     images = [Image.fromarray(image) for image in images]
     for i, image in enumerate(images):
-        image.save(os.path.join(fp,f"{i}.png"))
-
-
+        image.save(os.path.join(fp, f"{i}.png"))

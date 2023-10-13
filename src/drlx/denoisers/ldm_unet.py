@@ -2,6 +2,7 @@ from torchtyping import TensorType
 from typing import Iterable, Union, Callable, Type, Tuple
 
 import torch
+import torch.nn.functional as F
 import numpy as np
 from diffusers import UNet2DConditionModel, DDIMScheduler
 from diffusers.models.attention_processor import (
@@ -112,7 +113,9 @@ class LDMUNet(BaseConditionalDenoiser):
                     block_id = int(name[len("down_blocks.")])
                     hidden_size = self.unet.config.block_out_channels[block_id]
 
-                if isinstance(attn_processor, (AttnAddedKVProcessor, SlicedAttnAddedKVProcessor, AttnAddedKVProcessor2_0)):
+                if isinstance(
+                    attn_processor, (AttnAddedKVProcessor, SlicedAttnAddedKVProcessor, AttnAddedKVProcessor2_0)
+                ):
                     lora_attn_processor_class = LoRAAttnAddedKVProcessor
                 else:
                     lora_attn_processor_class = (

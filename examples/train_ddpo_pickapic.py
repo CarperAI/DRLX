@@ -9,7 +9,7 @@ from drlx.utils import get_latest_checkpoint
 pipe = PickAPicPrompts()
 resume = False
 
-config = DRLXConfig.load_yaml("configs/ddpo_sd_pickapic.yml")
+config = DRLXConfig.load_yaml("configs/ddpo_sd_pickapic_lora.yml")
 trainer = DDPOTrainer(config)
 
 if resume:

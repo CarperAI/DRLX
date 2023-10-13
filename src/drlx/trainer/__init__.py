@@ -7,18 +7,20 @@ import os
 import torch
 
 from drlx.configs import DRLXConfig
-from drlx.reward_modelling import RewardModel   
+from drlx.reward_modelling import RewardModel
 from drlx.denoisers.ldm_unet import LDMUNet
 from drlx.pipeline import Pipeline
-from drlx.utils import get_optimizer_class, get_scheduler_class, get_diffusion_pipeline_class
+from drlx.utils import get_optimizer_class, get_scheduler_class
 
 from PIL import Image
+
 
 class BaseTrainer:
     """
     Base class for any DRLX trainer
     """
-    def __init__(self, config : DRLXConfig):
+
+    def __init__(self, config: DRLXConfig):
         self.config = config
 
         if self.config.train.tf32:
@@ -27,9 +29,9 @@ class BaseTrainer:
 
         # Assume these are defined in base classes
         self.optimizer = None
-        self.scheduler = None 
+        self.scheduler = None
         self.model = None
-    
+
     def setup_optimizer(self):
         """
         Returns an optimizer derived from an instance's config
@@ -53,20 +55,22 @@ class BaseTrainer:
         """
         Get model class from arch_name in config file. Currently only supports LDMUNet
         """
-        model_name = LDMUNet # nothing else is supported for now (TODO: add support for other models)
+        model_name = LDMUNet  # nothing else is supported for now (TODO: add support for other models)
         return model_name
 
     @abstractmethod
-    def train(self, pipeline : Pipeline, reward_fn : Callable[[Iterable[Image.Image], Iterable[str]], TensorType["batch"]]):
+    def train(
+        self, pipeline: Pipeline, reward_fn: Callable[[Iterable[Image.Image], Iterable[str]], TensorType["batch"]]
+    ):
         """
         Trains model on a given pipeline using a given reward function.
-        
+
         :param pipeline: Data pipeline used for training
         :param reward_fn: Function used to get rewards. Should take tuples of images (either as a sequence of numpy arrays, or as a list of images)
         """
         pass
 
-    def save_checkpoint(self, fp : str, components : Dict[str, Any], index : int = None):
+    def save_checkpoint(self, fp: str, components: Dict[str, Any], index: int = None):
         """
         Basic checkpoint saving for any derived trainer to use
 
@@ -86,7 +90,7 @@ class BaseTrainer:
             fp = os.path.join(fp, str(index))
             if not os.path.exists(fp):
                 os.makedirs(fp)
-        
+
         for key, component in components.items():
             torch.save(component, os.path.join(fp, f"{key}.pt"))
 

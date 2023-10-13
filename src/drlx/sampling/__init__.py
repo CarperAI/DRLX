@@ -10,14 +10,16 @@ from drlx.utils import rescale_noise_cfg
 
 from drlx.configs import SamplerConfig, DDPOConfig
 
+
 class Sampler:
     """
     Generic class for sampling generations using a denoiser. Assumes LDMUnet
     """
-    def __init__(self, config : SamplerConfig = SamplerConfig()):
+
+    def __init__(self, config: SamplerConfig = SamplerConfig()):
         self.config = config
 
-    def cfg_rescale(self, pred : TensorType["2 * b", "c", "h", "w"]):
+    def cfg_rescale(self, pred: TensorType["2 * b", "c", "h", "w"]):
         """
         Applies classifier free guidance to prediction and rescales if cfg_rescaling is enabled
 
@@ -32,11 +34,11 @@ class Sampler:
 
         if self.config.guidance_rescale is not None:
             pred = rescale_noise_cfg(pred, pred_cond, self.config.guidance_rescale)
-        
+
         return pred
 
     @torch.no_grad()
-    def sample(self, prompts : Iterable[str], denoiser, device = None, show_progress : bool = False, accelerator = None):
+    def sample(self, prompts: Iterable[str], denoiser, device=None, show_progress: bool = False, accelerator=None):
         """
         Samples latents given some prompts and a denoiser
 
@@ -58,23 +60,21 @@ class Sampler:
         noise_shape = denoiser_unwrapped.get_input_shape()
 
         text_embeds = preprocess(
-            prompts, mode = "embeds", device = device,
-            num_images_per_prompt = 1,
-            do_classifier_free_guidance = self.config.guidance_scale > 1.0
+            prompts,
+            mode="embeds",
+            device=device,
+            num_images_per_prompt=1,
+            do_classifier_free_guidance=self.config.guidance_scale > 1.0,
         ).detach()
 
-        scheduler.set_timesteps(self.config.num_inference_steps, device = device)
-        latents = torch.randn(len(prompts), *noise_shape, device = device)
+        scheduler.set_timesteps(self.config.num_inference_steps, device=device)
+        latents = torch.randn(len(prompts), *noise_shape, device=device)
 
-        for i, t in enumerate(tqdm(scheduler.timesteps), disable = not show_progress):
+        for i, t in enumerate(tqdm(scheduler.timesteps), disable=not show_progress):
             input = torch.cat([latents] * 2)
             input = scheduler.scale_model_input(input, t)
 
-            pred = denoiser(
-                pixel_values=input, 
-                time_step = t,
-                text_embeds = text_embeds
-            )
+            pred = denoiser(pixel_values=input, time_step=t, text_embeds=text_embeds)
 
             # guidance
             pred = self.cfg_rescale(pred)
@@ -88,13 +88,15 @@ class Sampler:
         else:
             return latents
 
+
 class DDPOSampler(Sampler):
-    def step_and_logprobs(self,
+    def step_and_logprobs(
+        self,
         scheduler,
-        pred : TensorType["b", "c", "h", "w"],
-        t : float,
-        latents : TensorType["b", "c", "h", "w"],
-        old_pred : Optional[TensorType["b", "c", "h", "w"]] = None
+        pred: TensorType["b", "c", "h", "w"],
+        t: float,
+        latents: TensorType["b", "c", "h", "w"],
+        old_pred: Optional[TensorType["b", "c", "h", "w"]] = None,
     ):
         """
         Steps backwards using scheduler. Considers the prediction as an action sampled
@@ -108,29 +110,31 @@ class DDPOSampler(Sampler):
         :param old_pred: Alternate prediction. If given, computes log probability of current model predicting alternative output.
         """
         scheduler_out = scheduler.step(pred, t, latents, self.config.eta, variance_noise=0)
-        
+
         # computing log_probs
         t_1 = t - scheduler.config.num_train_timesteps // self.config.num_inference_steps
         variance = scheduler._get_variance(t, t_1)
-        std_dev_t = self.config.eta * variance ** 0.5
+        std_dev_t = self.config.eta * variance**0.5
         prev_sample_mean = scheduler_out.prev_sample
         prev_sample = prev_sample_mean + torch.randn_like(prev_sample_mean) * std_dev_t
 
-        std_dev_t = torch.clip(std_dev_t, 1e-6) # force sigma > 1e-6
+        std_dev_t = torch.clip(std_dev_t, 1e-6)  # force sigma > 1e-6
 
         # If old_pred provided, we are finding probability of new model outputting same action as before
         # Otherwise finding probability of current action
-        action = old_pred if old_pred is not None else prev_sample # Log prob of new model giving old output
-        log_probs = -((action.detach() - prev_sample_mean) ** 2) / (2 * std_dev_t ** 2) - torch.log(std_dev_t) - math.log(math.sqrt(2 * math.pi))
-        log_probs = eo.reduce(log_probs, 'b c h w -> b', 'mean')
+        action = old_pred if old_pred is not None else prev_sample  # Log prob of new model giving old output
+        log_probs = (
+            -((action.detach() - prev_sample_mean) ** 2) / (2 * std_dev_t**2)
+            - torch.log(std_dev_t)
+            - math.log(math.sqrt(2 * math.pi))
+        )
+        log_probs = eo.reduce(log_probs, "b c h w -> b", "mean")
 
         return prev_sample, log_probs
 
     @torch.no_grad()
     def sample(
-        self, prompts, denoiser, device,
-        show_progress : bool = False,
-        accelerator = None
+        self, prompts, denoiser, device, show_progress: bool = False, accelerator=None
     ) -> Iterable[torch.Tensor]:
         """
         DDPO sampling is analagous to playing a game in an RL environment. This function samples
@@ -142,7 +146,7 @@ class DDPOSampler(Sampler):
         :param device: Device to do inference on
         :param show_progress: Display progress bar?
         :param accelerator: Accelerator object for accelerated training (optional)
-        
+
         :return: triple of final denoised latents, all model predictions,  all log probabilities for each prediction
         """
 
@@ -156,25 +160,23 @@ class DDPOSampler(Sampler):
         noise_shape = denoiser_unwrapped.get_input_shape()
 
         text_embeds = preprocess(
-            prompts, mode = "embeds", device = device,
-            num_images_per_prompt = 1,
-            do_classifier_free_guidance = self.config.guidance_scale > 1.0
+            prompts,
+            mode="embeds",
+            device=device,
+            num_images_per_prompt=1,
+            do_classifier_free_guidance=self.config.guidance_scale > 1.0,
         ).detach()
 
-        scheduler.set_timesteps(self.config.num_inference_steps, device = device)
-        latents = torch.randn(len(prompts), *noise_shape, device = device)
+        scheduler.set_timesteps(self.config.num_inference_steps, device=device)
+        latents = torch.randn(len(prompts), *noise_shape, device=device)
 
         all_step_preds, all_log_probs = [latents], []
 
-        for t in tqdm(scheduler.timesteps, disable = not show_progress):
-            latent_input = torch.cat([latents] * 2)  
+        for t in tqdm(scheduler.timesteps, disable=not show_progress):
+            latent_input = torch.cat([latents] * 2)
             latent_input = scheduler.scale_model_input(latent_input, t)
 
-            pred = denoiser(
-                pixel_values = latent_input,
-                time_step = t,
-                text_embeds = text_embeds
-            )
+            pred = denoiser(pixel_values=latent_input, time_step=t, text_embeds=text_embeds)
 
             # cfg
             pred = self.cfg_rescale(pred)
@@ -185,18 +187,21 @@ class DDPOSampler(Sampler):
             all_step_preds.append(prev_sample)
             all_log_probs.append(log_probs)
             latents = prev_sample
-        
+
         return latents, torch.stack(all_step_preds), torch.stack(all_log_probs)
-    
+
     def compute_loss(
-        self, prompts, denoiser, device,
-        show_progress : bool = False,
-        advantages = None, old_preds = None, old_log_probs = None,
-        method_config : DDPOConfig = None,
-        accelerator = None
+        self,
+        prompts,
+        denoiser,
+        device,
+        show_progress: bool = False,
+        advantages=None,
+        old_preds=None,
+        old_log_probs=None,
+        method_config: DDPOConfig = None,
+        accelerator=None,
     ):
-
-
         """
         Computes the loss for the DDPO sampling process. This function is used to train the denoiser model.
 
@@ -215,9 +220,9 @@ class DDPOSampler(Sampler):
 
         # All metrics are reduced and gathered before result is returned
         metrics = {
-            "loss" : [],
-            "kl_div" : [], # ~ KL div between new policy and old one (average)
-            "clip_frac" : [], # Proportion of policy updates where magnitude of update was clipped
+            "loss": [],
+            "kl_div": [],  # ~ KL div between new policy and old one (average)
+            "clip_frac": [],  # Proportion of policy updates where magnitude of update was clipped
         }
 
         if accelerator is None:
@@ -228,45 +233,40 @@ class DDPOSampler(Sampler):
         scheduler = denoiser_unwrapped.scheduler
         preprocess = denoiser_unwrapped.preprocess
 
-        adv_clip = method_config.clip_advantages # clip value for advantages
-        pi_clip = method_config.clip_ratio # clip value for policy ratio
+        adv_clip = method_config.clip_advantages  # clip value for advantages
+        pi_clip = method_config.clip_ratio  # clip value for policy ratio
 
         text_embeds = preprocess(
-            prompts, mode = "embeds", device = device,
-            num_images_per_prompt = 1,
-            do_classifier_free_guidance = self.config.guidance_scale > 1.0
+            prompts,
+            mode="embeds",
+            device=device,
+            num_images_per_prompt=1,
+            do_classifier_free_guidance=self.config.guidance_scale > 1.0,
         ).detach()
 
-        scheduler.set_timesteps(self.config.num_inference_steps, device = device)
-        total_loss = 0.
+        scheduler.set_timesteps(self.config.num_inference_steps, device=device)
+        total_loss = 0.0
 
-        for i, t in enumerate(tqdm(scheduler.timesteps, disable = not show_progress)):
+        for i, t in enumerate(tqdm(scheduler.timesteps, disable=not show_progress)):
             latent_input = torch.cat([old_preds[i].detach()] * 2)
             latent_input = scheduler.scale_model_input(latent_input, t)
 
-            pred = denoiser(
-                pixel_values = latent_input,
-                time_step = t,
-                text_embeds = text_embeds
-            )
+            pred = denoiser(pixel_values=latent_input, time_step=t, text_embeds=text_embeds)
 
             # cfg
             pred = self.cfg_rescale(pred)
 
-            # step 
-            prev_sample, log_probs = self.step_and_logprobs(
-                scheduler, pred, t, old_preds[i],
-                old_preds[i+1]
-            )
+            # step
+            prev_sample, log_probs = self.step_and_logprobs(scheduler, pred, t, old_preds[i], old_preds[i + 1])
 
             # Need to be computed and detached again because of autograd weirdness
-            clipped_advs = torch.clip(advantages,-adv_clip,adv_clip).detach()
+            clipped_advs = torch.clip(advantages, -adv_clip, adv_clip).detach()
 
             # ppo actor loss
-            
+
             ratio = torch.exp(log_probs - old_log_probs[i].detach())
             surr1 = -clipped_advs * ratio
-            surr2 = -clipped_advs * torch.clip(ratio, 1. - pi_clip, 1. + pi_clip)
+            surr2 = -clipped_advs * torch.clip(ratio, 1.0 - pi_clip, 1.0 + pi_clip)
             loss = torch.max(surr1, surr2).mean()
             if accelerator is not None:
                 accelerator.backward(loss)
@@ -276,15 +276,15 @@ class DDPOSampler(Sampler):
             # Metric computations
             kl_div = 0.5 * (log_probs - old_log_probs[i]).mean() ** 2
             clip_frac = ((ratio < 1 - pi_clip) | (ratio > 1 + pi_clip)).float().mean()
-            
+
             metrics["loss"].append(loss.item())
             metrics["kl_div"].append(kl_div.item())
             metrics["clip_frac"].append(clip_frac.item())
 
         # Reduce across timesteps then across devices
         for k in metrics:
-            metrics[k] = torch.tensor(metrics[k]).mean().cuda() # Needed for reduction to work
+            metrics[k] = torch.tensor(metrics[k]).mean().cuda()  # Needed for reduction to work
         if accelerator is not None:
-            metrics = accelerator.reduce(metrics, 'mean')
+            metrics = accelerator.reduce(metrics, "mean")
 
         return metrics

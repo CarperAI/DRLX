@@ -34,8 +34,8 @@ logging:
 train:
   num_epochs: 450
   num_samples_per_epoch: 256
-  batch_size: 4
-  sample_batch_size: 32
+  batch_size: 1
+  sample_batch_size: 1
   grad_clip: 1.0
   checkpoint_interval: 50
   tf32: True
