@@ -9,8 +9,9 @@ class ImagenetAnimalPrompts(PromptPipeline):
     """
     def __init__(self, prefix='A picture of a ', postfix=', 4k unreal engine', num=10000, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        r = requests.get("https://raw.githubusercontent.com/formigone/tf-imagenet/master/LOC_synset_mapping.txt")
-        with open("LOC_synset_mapping.txt", "wb") as f: f.write(r.content)
+        if not Path('LOC_synset_mapping.txt').exists():
+            r = requests.get("https://raw.githubusercontent.com/formigone/tf-imagenet/master/LOC_synset_mapping.txt")
+            with open("LOC_synset_mapping.txt", "wb") as f: f.write(r.content)
         self.synsets = {k:v for k,v in [o.split(',')[0].split(' ', maxsplit=1) for o in Path('LOC_synset_mapping.txt').read_text().splitlines()]}
         self.imagenet_classes = list(self.synsets.values())
         self.prefix = prefix
