@@ -21,6 +21,9 @@ from PIL import Image
 
 from diffusers import StableDiffusionPipeline
 
+from diffusers.utils import convert_state_dict_to_diffusers
+from peft.utils import get_peft_model_state_dict
+
 class DDPOExperienceReplay(Dataset):
     """
     Utility class to compute advantages and create dataloader from sampling experiences.
@@ -355,7 +358,7 @@ class DDPOTrainer(BaseTrainer):
                 for (all_step_preds, log_probs, advantages, prompts) in tqdm(experience_loader, disable=not self.accelerator.is_main_process):
                     with self.accelerator.accumulate(self.model): # Accumulate across minibatches
                         metrics = self.loss(all_step_preds, log_probs, advantages, prompts)
-                        self.accelerator.clip_grad_norm_(self.model.parameters(), self.config.train.grad_clip)
+                        self.accelerator.clip_grad_norm_(filter(lambda p: p.requires_grad, self.model.parameters()), self.config.train.grad_clip)
                         self.optimizer.step()
                         self.scheduler.step()
                         self.optimizer.zero_grad()
@@ -402,8 +405,12 @@ class DDPOTrainer(BaseTrainer):
         if self.accelerator.is_main_process:
             os.makedirs(fp, exist_ok = True)
             unwrapped_model = self.accelerator.unwrap_model(self.model)
-            self.pipe.unet = unwrapped_model.unet
-            self.pipe.save_pretrained(fp, safe_serialization = unwrapped_model.config.use_safetensors)
+            if self.config.model.lora_rank is not None:
+                unet_lora_state_dict = convert_state_dict_to_diffusers(get_peft_model_state_dict(unwrapped_model.unet))
+                StableDiffusionPipeline.save_lora_weights(fp, unet_lora_layers=unet_lora_state_dict, safe_serialization = unwrapped_model.config.use_safetensors)
+            else:
+                self.pipe.unet = unwrapped_model.unet
+                self.pipe.save_pretrained(fp, safe_serialization = unwrapped_model.config.use_safetensors)
         self.accelerator.wait_for_everyone()
 
     def extract_pipeline(self):

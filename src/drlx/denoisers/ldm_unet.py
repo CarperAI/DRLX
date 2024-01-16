@@ -9,6 +9,8 @@ from drlx.denoisers import BaseConditionalDenoiser
 from drlx.configs import ModelConfig, SamplerConfig
 from drlx.sampling import Sampler
 
+from peft import LoraConfig
+
 class LDMUNet(BaseConditionalDenoiser):
     """
     Class for Latent Diffusion Model UNet denoiser. Can optionally pass sampler information, though it is not required. Generally used in tandem with a diffusers pipeline.
@@ -76,11 +78,26 @@ class LDMUNet(BaseConditionalDenoiser):
 
         self.text_encoder.requires_grad_(False)
         self.vae.requires_grad_(False)
+        self.unet.requires_grad_(not self.config.lora_rank)
 
         self.tokenizer = pipe.tokenizer
         self.scheduler = DDIMScheduler.from_config(pipe.scheduler.config)
 
         if self.config.gradient_checkpointing: self.unet.enable_gradient_checkpointing()
+
+        if self.config.lora_rank:
+            peft_config = LoraConfig(
+                r=self.config.lora_rank,
+                lora_alpha=self.config.lora_rank,
+                init_lora_weights="gaussian",
+                target_modules=["to_k", "to_q", "to_v", "to_out.0"],
+                )
+
+            self.unet.add_adapter(peft_config)
+            for param in self.unet.parameters():
+                # only upcast trainable parameters (LoRA) into fp32
+                if param.requires_grad:
+                    param.data = param.to(torch.float32)
 
         return self, pipe
     
