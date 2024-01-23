@@ -92,6 +92,18 @@ class DDPOConfig(MethodConfig):
     buffer_size: int = 32 # Set to None to avoid using per prompt stat tracker
     min_count: int = 16
 
+@register_method("DPO")
+@dataclass
+class DPOConfig(MethodConfig):
+    """
+    Config for DPO-related hyperparams
+
+    :param beta: Deviation from initial model
+    :type beta: float
+    """
+    name : str = "DPO"
+    beta : float = 0.9
+
 @dataclass
 class TrainConfig(ConfigClass):
     """
