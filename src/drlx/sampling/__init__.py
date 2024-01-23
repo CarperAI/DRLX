@@ -5,6 +5,7 @@ import torch
 from tqdm import tqdm
 import math
 import einops as eo
+import torch.nn.functional as F
 
 from drlx.utils import rescale_noise_cfg
 
@@ -288,3 +289,103 @@ class DDPOSampler(Sampler):
             metrics = accelerator.reduce(metrics, 'mean')
 
         return metrics
+
+class DPOSampler(Sampler):
+    def compute_loss(
+        self,
+        prompts,
+        chosen_img,
+        rejected_img,
+        denoiser,
+        ref_denoiser,
+        vae,
+        device,
+        method_config,
+        accelerator = None
+    ):
+        if accelerator is None:
+            dn_unwrapped = accelerator.unwrap_model(denoiser)
+        else:
+            dn_unwrapped = denoiser
+
+        scheduler = dn_unwrapped.scheduler
+        preprocess = dn_unwrapped.preprocess
+        beta = method_config.beta
+
+        # Text and image preprocessing
+        with torch.no_grad():
+            text_embeds = preprocess(
+                prompts, mode = "embeds", device = device,
+                num_images_per_prompt = 1,
+                do_classifier_free_guidance = self.config.guidance_scale > 1.0
+            ).detach()
+
+            chosen_latent = vae.encode(chosen_img).latent_dist.sample()
+            rejected_latent = vae.encode(rejected_img).latent_dist.sample()
+
+        # sample random ts
+        timesteps = torch.randint(
+            0, self.config.num_inference_steps, (len(chosen_pred),), device = device, dtype = torch.long
+        )
+
+        # One step of noising to samples
+        noise = torch.randn_like(chosen_latent) # [B, C, H, W]
+        noisy_chosen = scheduler.add_noise(chosen_latent, noise, timesteps)
+        noisy_rejected = scheduler.add_noise(rejected_latent, noise, timesteps)
+
+        def predict(model, pixel_values):
+            return model(
+                pixel_values = pixel_values,
+                time_step = timesteps,
+                text_embeds = text_embeds
+            )
+
+        # Stack predictions for chosen and rejected samples
+        chosen_out, rejected_out = predict(denoiser, noisy_chosen), predict(denoiser, noisy_rejected)
+        with torch.no_grad():
+            chosen_ref, rejected_ref = predict(ref_denoiser, noisy_chosen), predict(ref_denoiser, noisy_rejected)
+        
+        if scheduler.config.prediction_type == "epsilon":
+            chosen_target, rejected_target = noise, noise
+        elif scheduler.config.prediction_type == "v_prediction":
+            chosen_target = scheduler.get_velocity(
+                chosen_latent,
+                nosie,
+                timesteps
+            )
+            rejected_target = scheduler.get_velocity(
+                rejected_latent,
+                noise,
+                timesteps
+            )
+
+        # Basic Diffusion Loss
+        mse_chosen = F.mse_loss(chosen_out, chosen_target, reduction = "mean")
+        mse_rejected = F.mse_loss(rejected_out, rejected_target, reduction = "mean")
+        base_loss = 0.5 * (mse_chosen.mean() + mse_rejected.mean()) # logging
+        model_diff = mse_chosen - mse_rejected
+
+        # Reference model
+        with torch.no_grad():
+            ref_mse_chosen = F.mse_loss(chosen_ref, chosen_target, reduction = "mean")
+            ref_mse_rejected = F.mse_loss(rejeceted_ref, rejeceted_target, reduction = "mean")
+            ref_diff = ref_mse_chosen - ref_mse_rejected
+        
+        # DPO Objective
+        surr_loss = (-beta/2) * (model_diff - ref_diff)
+        loss = -1 * F.logsigmoid(surr_loss.mean())
+
+        # Get approx accuracy as models probability of giving chosen over rejected
+        acc = (surr_loss > 0).sum().float() / len(surr_loss)
+        acc += 0.5 * (surr_loss == 0).sum().float() / len(surr_loss) # 50% for when both match
+
+        if accelerator is None:
+            loss.backward()
+        else:
+            accelerator.backward(loss)
+
+        return {
+            "loss" : loss.item(),
+            "diffusion_loss" : base_loss.item(),
+            "accuracy" : acc.item()
+        }
