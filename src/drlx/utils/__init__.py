@@ -223,7 +223,12 @@ def save_images(images : np.array, fp : str):
 
     os.makedirs(fp, exist_ok = True)
 
-    images = [Image.fromarray(image) for image in images]
+    if isinstance(images, np.ndarray):
+        images = [Image.fromarray(image) for image in images]
+    elif isinstance(images, list) and all(isinstance(i, Image.Image) for i in images):
+        pass
+    else:
+        raise ValueError("Images should be either a numpy array or a list of PIL Images")
     for i, image in enumerate(images):
         image.save(os.path.join(fp,f"{i}.png"))
 
