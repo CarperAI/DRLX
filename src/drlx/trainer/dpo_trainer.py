@@ -99,9 +99,6 @@ class DPOTrainer(AcceleratedTrainer):
 
         assert isinstance(self.sampler, DPOSampler), "Error: Model Sampler for DPO training must be DPO sampler"
 
-        if isinstance(reward_fn, torch.nn.Module):
-            reward_fn = self.accelerator.prepare(reward_fn)
-
         # Set the epoch count
         epochs = self.config.train.num_epochs
         if self.config.train.total_samples is not None:
@@ -116,6 +113,7 @@ class DPOTrainer(AcceleratedTrainer):
         
         # Ref model
         ref_model = self.setup_model()
+        ref_model = ref_model.to("cuda:1")
 
         # === MAIN TRAINING LOOP ===
 

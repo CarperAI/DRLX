@@ -297,12 +297,16 @@ class DPOSampler(Sampler):
         chosen_img,
         rejected_img,
         denoiser,
-        ref_denoiser,
         vae,
         device,
         method_config,
-        accelerator = None
+        accelerator = None,
+        ref_denoiser = none
     ):
+    """
+    Compute metrics and do backwards pass on loss. Assumes LoRA if reference is not given.
+    """
+        do_lora = ref_denoiser is None
         if accelerator is None:
             dn_unwrapped = accelerator.unwrap_model(denoiser)
         else:
@@ -325,7 +329,7 @@ class DPOSampler(Sampler):
 
         # sample random ts
         timesteps = torch.randint(
-            0, self.config.num_inference_steps, (len(chosen_pred),), device = device, dtype = torch.long
+            0, self.config.num_inference_steps, (len(chosen_img),), device = device, dtype = torch.long
         )
 
         # One step of noising to samples
@@ -335,15 +339,17 @@ class DPOSampler(Sampler):
 
         def predict(model, pixel_values):
             return model(
-                pixel_values = pixel_values,
-                time_step = timesteps,
-                text_embeds = text_embeds
+                pixel_values = pixel_values.to(model.device),
+                time_step = timesteps.to(model.device),
+                text_embeds = text_embeds.to(model.device)
             )
 
         # Stack predictions for chosen and rejected samples
         chosen_out, rejected_out = predict(denoiser, noisy_chosen), predict(denoiser, noisy_rejected)
         with torch.no_grad():
             chosen_ref, rejected_ref = predict(ref_denoiser, noisy_chosen), predict(ref_denoiser, noisy_rejected)
+            chosen_ref = chosen_ref.to(denoiser.device)
+            rejected_ref = rejected_ref.to(denoiser.device)
         
         if scheduler.config.prediction_type == "epsilon":
             chosen_target, rejected_target = noise, noise

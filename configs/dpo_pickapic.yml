@@ -5,7 +5,7 @@ model:
   model_path: "stabilityai/stable-diffusion-2-1-base"
   model_arch_type: "LDMUnet"
   attention_slicing: True
-  xformers_memory_efficient: True
+  xformers_memory_efficient: False
   gradient_checkpointing: True
 
 sampler:
