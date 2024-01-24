@@ -4,7 +4,6 @@ from dataclasses import dataclass, field, asdict
 from typing import Any, Dict, List, Optional, Set
 import yaml
 
-
 @dataclass
 class ConfigClass:
     @classmethod
@@ -250,16 +249,8 @@ class ModelConfig(ConfigClass):
     :param gradient_checkpointing: Whether to use gradient checkpointing
     :type gradient_checkpointing: bool
 
-    :param peft_config: configuration for peft (Parameter Efficient Fine-Tuning library).
-        Peft is designed to reduce the number of parameters to train and the memory footprint,
-        without significant performance loss. It supports multiple techniques such as LORA
-        or prefix tuning (cf. https://github.com/huggingface/peft).
-
-        Here is an example of LORA configuration:
-            {"peft_type": "LORA", "r": 8, "lora_alpha": 32, "lora_dropout": 0.1}
-
-        (parameter-efficient fine-tuning was previously done in trlx with OpenDelta, but it is no longer supported)
-    :type peft_config: Union[peft.PeftConfig, Dict[str, Any]]
+    :param lora_rank: Rank of LoRA matrix
+    :type lora_rank: int
     """
 
     model_path: str = None
@@ -269,7 +260,7 @@ class ModelConfig(ConfigClass):
     attention_slicing: bool = False
     xformers_memory_efficient: bool = False 
     gradient_checkpointing: bool = False
-    peft_config: Dict[str, Any] = field(default_factory=dict) # TODO: add PEFT support
+    lora_rank: int = None
 
 
 

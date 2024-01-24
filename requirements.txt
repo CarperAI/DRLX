@@ -3,8 +3,10 @@ torchvision
 torchtyping
 einops
 diffusers
+peft
 transformers
 accelerate
+datasets
 xformers
 wandb
 fastprogress

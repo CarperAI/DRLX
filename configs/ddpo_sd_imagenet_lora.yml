@@ -7,14 +7,14 @@ model:
   attention_slicing: True
   xformers_memory_efficient: True
   gradient_checkpointing: True
-
+  lora_rank: 4
 sampler:
   num_inference_steps: 50
 
 optimizer:
   name: "adamw"
   kwargs:
-    lr: 1.0e-5
+    lr: 1.0e-4
     weight_decay: 1.0e-4
     betas: [0.9, 0.999]
 
@@ -25,7 +25,7 @@ scheduler:
     end_factor: 1.0
   
 logging:
-  run_name: 'ddpo_sd_imagenet'
+  run_name: 'ddpo_sd_imagenet_lora'
   wandb_project: 'DRLX'
 
 train:
@@ -34,7 +34,7 @@ train:
   batch_size: 4
   sample_batch_size: 32
   grad_clip: 1.0
-  checkpoint_interval: 50
+  checkpoint_interval: 10
   tf32: True
   suppress_log_keywords: "diffusers.pipelines,transformers"
   save_samples: False

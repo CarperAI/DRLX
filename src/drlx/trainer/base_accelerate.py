@@ -120,3 +120,50 @@ class AcceleratedTrainer(BaseTrainer):
         """
         self.accelerator.load_state(fp)
         self.accelerator.print("Succesfully loaded checkpoint")
+
+    def save_checkpoint(self, fp : str, components = None):
+        """
+        Save checkpoint in main process
+
+        :param fp: File path to save checkpoint to
+        """
+        if self.accelerator.is_main_process:
+            os.makedirs(fp, exist_ok = True)
+            self.accelerator.save_state(output_dir=fp)
+        self.accelerator.wait_for_everyone() # need to use this twice or a corrupted state is saved
+
+    def save_pretrained(self, fp : str):
+        """
+        Save model into pretrained pipeline so it can be loaded in pipeline later
+
+        :param fp: File path to save to
+        """
+        if self.accelerator.is_main_process:
+            os.makedirs(fp, exist_ok = True)
+            unwrapped_model = self.accelerator.unwrap_model(self.model)
+            if self.config.model.lora_rank is not None:
+                unet_lora_state_dict = convert_state_dict_to_diffusers(get_peft_model_state_dict(unwrapped_model.unet))
+                StableDiffusionPipeline.save_lora_weights(fp, unet_lora_layers=unet_lora_state_dict, safe_serialization = unwrapped_model.config.use_safetensors)
+            else:
+                self.pipe.unet = unwrapped_model.unet
+                self.pipe.save_pretrained(fp, safe_serialization = unwrapped_model.config.use_safetensors)
+        self.accelerator.wait_for_everyone()
+
+    def extract_pipeline(self):
+        """
+        Return original pipeline with finetuned denoiser plugged in
+
+        :return: Diffusers pipeline
+        """
+
+        self.pipe.unet = self.accelerator.unwrap_model(self.model).unet
+        return self.pipe
+
+    def load_checkpoint(self, fp : str):
+        """
+        Load checkpoint
+
+        :param fp: File path to checkpoint to load from
+        """
+        self.accelerator.load_state(fp)
+        self.accelerator.print("Succesfully loaded checkpoint")

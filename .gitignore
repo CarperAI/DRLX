@@ -5,3 +5,5 @@ __pycache__/
 checkpoints/
 *.egg-info/
 output/
+temp/
+LOC_synset_mapping.txt

@@ -21,6 +21,9 @@ from PIL import Image
 
 from diffusers import StableDiffusionPipeline
 
+from diffusers.utils import convert_state_dict_to_diffusers
+from peft.utils import get_peft_model_state_dict
+
 class DDPOExperienceReplay(Dataset):
     """
     Utility class to compute advantages and create dataloader from sampling experiences.
@@ -308,7 +311,7 @@ class DDPOTrainer(AcceleratedTrainer):
                 for (all_step_preds, log_probs, advantages, prompts) in tqdm(experience_loader, disable=not self.accelerator.is_main_process):
                     with self.accelerator.accumulate(self.model): # Accumulate across minibatches
                         metrics = self.loss(all_step_preds, log_probs, advantages, prompts)
-                        self.accelerator.clip_grad_norm_(self.model.parameters(), self.config.train.grad_clip)
+                        self.accelerator.clip_grad_norm_(filter(lambda p: p.requires_grad, self.model.parameters()), self.config.train.grad_clip)
                         self.optimizer.step()
                         self.scheduler.step()
                         self.optimizer.zero_grad()

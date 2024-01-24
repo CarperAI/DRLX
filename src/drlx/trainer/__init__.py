@@ -36,7 +36,7 @@ class BaseTrainer:
         """
         optimizer_class = get_optimizer_class(self.config.optimizer.name)
         optimizer = optimizer_class(
-            self.model.parameters(),
+            filter(lambda p: p.requires_grad, self.model.parameters()),
             **self.config.optimizer.kwargs,
         )
         return optimizer
