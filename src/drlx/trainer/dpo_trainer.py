@@ -56,7 +56,7 @@ class DPOTrainer(AcceleratedTrainer):
         """
         return self.sampler.compute_loss(
             prompts=prompts, chosen_img=chosen_img, rejected_img=rejected_img,
-            denoiser=self.model, ref_denoiser=ref_denoiser, vae=self.model.vae
+            denoiser=self.model, ref_denoiser=ref_denoiser, vae=self.model.vae,
             device=self.accelerator.device,
             method_config=self.config.method,
             accelerator=self.accelerator
@@ -134,14 +134,21 @@ class DPOTrainer(AcceleratedTrainer):
             self.accelerator.print(f"Epoch {epoch}/{epochs}.")
 
             for batch in dataloader:
-                metrics = self.compute_loss(
+                metrics = self.loss(
                     prompts = batch['prompts'],
                     chosen_img = batch['chosen_pixel_values'],
                     rejected_img = batch['rejected_pixel_values'],
-                    ref_model
+                    ref_denoiser = ref_model
                 )
 
                 self.accelerator.wait_for_everyone()
+
+                # Optimizer step
+                self.accelerator.clip_grad_norm_(self.model.parameters(), self.config.train.grad_clip)
+                self.optimizer.step()
+                self.scheduler.step()
+                self.optimizer.zero_grad()
+
                 # Generate the sample prompts
                 self.pipe.unet = self.model.unet
                 with torch.no_grad():
