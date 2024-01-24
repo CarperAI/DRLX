@@ -6,6 +6,7 @@ from drlx.pipeline.dpo_pipeline import DPOPipeline
 import torch
 from torchvision import transforms
 from torch.utils.data import Dataset, DataLoader
+from PIL import Image
 
 def convert_bytes_to_image(image_bytes, id):
     try:
@@ -16,7 +17,7 @@ def convert_bytes_to_image(image_bytes, id):
         print(f"An error occurred: {e}")
 
 def create_train_dataset():
-    ds = load_dataset("yuvalkirstain/pickapic_v2",split='train', streaming=True
+    ds = load_dataset("yuvalkirstain/pickapic_v2",split='train')
     ds = ds.filter(lambda example: example['has_label'] == True and example['label_0'] != 0.5)
     return ds
 
@@ -47,8 +48,8 @@ class Collator:
         images_1 = images_1 * 2 - 1
 
         return {
-            "chosen_pixel_values" : image_0,
-            "rejected_pixel_values" : image_1,
+            "chosen_pixel_values" : images_0,
+            "rejected_pixel_values" : images_1,
             "prompts" : prompts
         }
 
@@ -60,5 +61,5 @@ class PickAPicDPOPipeline(DPOPipeline):
         self.train_ds = create_train_dataset()
         self.dc = Collator()
 
-    def create_loader(**kwargs):
+    def create_loader(self, **kwargs):
         return DataLoader(self.train_ds, collate_fn = self.dc, **kwargs)
