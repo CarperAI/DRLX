@@ -10,6 +10,8 @@ import torch
 from diffusers import StableDiffusionPipeline
 import os
 
+from diffusers.utils import convert_state_dict_to_diffusers
+from peft.utils import get_peft_model_state_dict
 
 class AcceleratedTrainer(BaseTrainer):
     """
@@ -79,30 +81,6 @@ class AcceleratedTrainer(BaseTrainer):
         self.pipe = pipe            
         return model
 
-    def save_checkpoint(self, fp : str, components = None):
-        """
-        Save checkpoint in main process
-
-        :param fp: File path to save checkpoint to
-        """
-        if self.accelerator.is_main_process:
-            os.makedirs(fp, exist_ok = True)
-            self.accelerator.save_state(output_dir=fp)
-        self.accelerator.wait_for_everyone() # need to use this twice or a corrupted state is saved
-
-    def save_pretrained(self, fp : str):
-        """
-        Save model into pretrained pipeline so it can be loaded in pipeline later
-
-        :param fp: File path to save to
-        """
-        if self.accelerator.is_main_process:
-            os.makedirs(fp, exist_ok = True)
-            unwrapped_model = self.accelerator.unwrap_model(self.model)
-            self.pipe.unet = unwrapped_model.unet
-            self.pipe.save_pretrained(fp, safe_serialization = unwrapped_model.config.use_safetensors)
-        self.accelerator.wait_for_everyone()
-
     def extract_pipeline(self):
         """
         Return original pipeline with finetuned denoiser plugged in
@@ -159,12 +137,3 @@ class AcceleratedTrainer(BaseTrainer):
 
         self.pipe.unet = self.accelerator.unwrap_model(self.model).unet
         return self.pipe
-
-    def load_checkpoint(self, fp : str):
-        """
-        Load checkpoint
-
-        :param fp: File path to checkpoint to load from
-        """
-        self.accelerator.load_state(fp)
-        self.accelerator.print("Succesfully loaded checkpoint")

@@ -188,10 +188,11 @@ class DPOTrainer(AcceleratedTrainer):
                         base_path = f"./checkpoints/{self.config.logging.run_name}"
                         output_path = f"./output/{self.config.logging.run_name}"
                         self.accelerator.wait_for_everyone()
+                        # Commenting this out for now so I can test rest of the code even though this is broken
                         self.save_checkpoint(f"{base_path}/{accum}")
                         self.save_pretrained(output_path)
 
-                    last_epoch_time = time_per_1k(self.config.train.num_samples_per_epoch)
+                        last_epoch_time = time_per_1k(self.config.train.num_samples_per_epoch)
             
                 del metrics
             del dataloader
