@@ -80,6 +80,7 @@ class DPOTrainer(AcceleratedTrainer):
         """
 
         # === SETUP ===
+        do_lora = self.config.model.lora_rank is not None
 
         # Singular dataloader made to get a sample of prompts
         # This sample batch is dependent on config seed so it can be same across runs
@@ -112,8 +113,11 @@ class DPOTrainer(AcceleratedTrainer):
         last_batch_time = timer.hit()
         
         # Ref model
-        ref_model = self.setup_model()
-        ref_model = ref_model.to("cuda:1")
+        if not do_lora:
+            ref_model = self.setup_model()
+            ref_model = ref_model.to("cuda:1")
+        else:
+            ref_model = None
 
         # === MAIN TRAINING LOOP ===
 
@@ -142,7 +146,10 @@ class DPOTrainer(AcceleratedTrainer):
                 self.accelerator.wait_for_everyone()
 
                 # Optimizer step
-                self.accelerator.clip_grad_norm_(self.model.parameters(), self.config.train.grad_clip)
+                self.accelerator.clip_grad_norm_(
+                    filter(lambda p: p.requires_grad, self.model.parameters()),
+                    self.config.train.grad_clip
+                )
                 self.optimizer.step()
                 self.scheduler.step()
                 self.optimizer.zero_grad()

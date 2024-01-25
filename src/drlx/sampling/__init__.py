@@ -221,13 +221,8 @@ class DDPOSampler(Sampler):
             "clip_frac" : [], # Proportion of policy updates where magnitude of update was clipped
         }
 
-        if accelerator is None:
-            denoiser_unwrapped = denoiser
-        else:
-            denoiser_unwrapped = accelerator.unwrap_model(denoiser)
-
-        scheduler = denoiser_unwrapped.scheduler
-        preprocess = denoiser_unwrapped.preprocess
+        scheduler = accelerator.unwrap_model(denoiser).scheduler
+        preprocess = accelerator.unwrap_model(denoiser).preprocess
 
         adv_clip = method_config.clip_advantages # clip value for advantages
         pi_clip = method_config.clip_ratio # clip value for policy ratio
@@ -301,19 +296,16 @@ class DPOSampler(Sampler):
         device,
         method_config,
         accelerator = None,
-        ref_denoiser = none
+        ref_denoiser = None
     ):
-    """
-    Compute metrics and do backwards pass on loss. Assumes LoRA if reference is not given.
-    """
+        """
+        Compute metrics and do backwards pass on loss. Assumes LoRA if reference is not given.
+        """
         do_lora = ref_denoiser is None
-        if accelerator is None:
-            dn_unwrapped = accelerator.unwrap_model(denoiser)
-        else:
-            dn_unwrapped = denoiser
 
-        scheduler = dn_unwrapped.scheduler
-        preprocess = dn_unwrapped.preprocess
+        scheduler = accelerator.unwrap_model(denoiser).scheduler
+        preprocess = accelerator.unwrap_model(denoiser).preprocess
+
         beta = method_config.beta
 
         # Text and image preprocessing
@@ -337,45 +329,65 @@ class DPOSampler(Sampler):
         noisy_chosen = scheduler.add_noise(chosen_latent, noise, timesteps)
         noisy_rejected = scheduler.add_noise(rejected_latent, noise, timesteps)
 
-        def predict(model, pixel_values):
-            return model(
-                pixel_values = pixel_values.to(model.device),
-                time_step = timesteps.to(model.device),
-                text_embeds = text_embeds.to(model.device)
-            )
-
-        # Stack predictions for chosen and rejected samples
-        chosen_out, rejected_out = predict(denoiser, noisy_chosen), predict(denoiser, noisy_rejected)
-        with torch.no_grad():
-            chosen_ref, rejected_ref = predict(ref_denoiser, noisy_chosen), predict(ref_denoiser, noisy_rejected)
-            chosen_ref = chosen_ref.to(denoiser.device)
-            rejected_ref = rejected_ref.to(denoiser.device)
+        # Doubling across chosen and rejeceted
+        def double_up(x):
+            return torch.cat([x,x], dim = 0)
         
+        def double_down(x):
+            n = len(x)
+            return x[:n//2], x[n//2:]
+
+        # Double everything up so we can input both chosen and rejected at the same time
+        timesteps = double_up(timesteps)
+        noise = double_up(noise)
+        text_embeds = double_up(text_embeds)
+        latent = torch.cat([chosen_latent, rejected_latent])
+
+        noisy_inputs = scheduler.add_noise(
+            latent,
+            noise,
+            timesteps
+        )
+
+        # Get targets
         if scheduler.config.prediction_type == "epsilon":
-            chosen_target, rejected_target = noise, noise
+            target = noise
         elif scheduler.config.prediction_type == "v_prediction":
-            chosen_target = scheduler.get_velocity(
-                chosen_latent,
-                nosie,
-                timesteps
-            )
-            rejected_target = scheduler.get_velocity(
-                rejected_latent,
+            target = scheduler.get_velocity(
+                latent,
                 noise,
                 timesteps
             )
+        
+        # utility function to get loss simpler
+        def split_mse(pred, target):
+            mse = eo.reduce(F.mse_loss(pred, target), 'b ... -> b', reduction = "mean")
+            chosen, rejected = double_down(mse)
+            return mse.mean(), chose.mean() - rejected.mean()
 
-        # Basic Diffusion Loss
-        mse_chosen = F.mse_loss(chosen_out, chosen_target, reduction = "mean")
-        mse_rejected = F.mse_loss(rejected_out, rejected_target, reduction = "mean")
-        base_loss = 0.5 * (mse_chosen.mean() + mse_rejected.mean()) # logging
-        model_diff = mse_chosen - mse_rejected
+        # Forward pass and loss for DPO denoiser
+        pred = denoiser(
+            pixel_values = noisy_inputs,
+            time_step = timesteps,
+            text_embeds = text_embeds
+        )
+        model_diff, base_loss = split_mse(pred, targets)
 
-        # Reference model
+        # Forward pass and loss for refrence
         with torch.no_grad():
-            ref_mse_chosen = F.mse_loss(chosen_ref, chosen_target, reduction = "mean")
-            ref_mse_rejected = F.mse_loss(rejeceted_ref, rejeceted_target, reduction = "mean")
-            ref_diff = ref_mse_chosen - ref_mse_rejected
+            if do_lora:
+                accelerator.unwrap_model(denoiser).disable_adapters()
+
+                ref_pred = denoiser(
+                    pixel_values = noisy_inputs,
+                    time_step = timesteps,
+                    text_embeds = text_embeds
+                )
+                ref_diff, _ = split_mse(ref_pred, targets)
+
+                accelerator.unwrap_model(denoiser).enable_adapters()
+            else:
+                pass # TODO: Maybe not needed? Do we want non-LoRA DPO?
         
         # DPO Objective
         surr_loss = (-beta/2) * (model_diff - ref_diff)
