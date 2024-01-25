@@ -165,5 +165,16 @@ class LDMUNet(BaseConditionalDenoiser):
             encoder_hidden_states = text_embeds
         ).sample
     
+    @property
+    def device(self):
+        return self.unet.device
+
+    def enable_adapters(self):
+        if self.config.lora_rank:
+            self.unet.enable_adapters()
+
+    def disable_adapters(self):
+        if self.config.lora_rank:
+            self.unet.disable_adapters()
 
         

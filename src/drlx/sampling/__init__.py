@@ -361,9 +361,9 @@ class DPOSampler(Sampler):
         
         # utility function to get loss simpler
         def split_mse(pred, target):
-            mse = eo.reduce(F.mse_loss(pred, target), 'b ... -> b', reduction = "mean")
+            mse = eo.reduce(F.mse_loss(pred, target, reduction = 'none'), 'b ... -> b', reduction = "mean")
             chosen, rejected = double_down(mse)
-            return mse.mean(), chose.mean() - rejected.mean()
+            return chosen - rejected, mse.mean()
 
         # Forward pass and loss for DPO denoiser
         pred = denoiser(
@@ -371,7 +371,7 @@ class DPOSampler(Sampler):
             time_step = timesteps,
             text_embeds = text_embeds
         )
-        model_diff, base_loss = split_mse(pred, targets)
+        model_diff, base_loss = split_mse(pred, target)
 
         # Forward pass and loss for refrence
         with torch.no_grad():
@@ -383,7 +383,7 @@ class DPOSampler(Sampler):
                     time_step = timesteps,
                     text_embeds = text_embeds
                 )
-                ref_diff, _ = split_mse(ref_pred, targets)
+                ref_diff, _ = split_mse(ref_pred, target)
 
                 accelerator.unwrap_model(denoiser).enable_adapters()
             else:

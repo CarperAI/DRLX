@@ -42,7 +42,8 @@ class DPOTrainer(AcceleratedTrainer):
         if self.config.model.model_path is not None:
             model, pipe = model.from_pretrained_pipeline(StableDiffusionPipeline, self.config.model.model_path)
 
-        self.pipe = pipe          
+        self.pipe = pipe
+        self.pipe.set_progress_bar_config(disable=True)         
         return model
 
     def loss(
@@ -135,7 +136,7 @@ class DPOTrainer(AcceleratedTrainer):
 
             self.accelerator.print(f"Epoch {epoch}/{epochs}.")
 
-            for batch in dataloader:
+            for batch in tqdm(dataloader):
                 metrics = self.loss(
                     prompts = batch['prompts'],
                     chosen_img = batch['chosen_pixel_values'],
@@ -159,7 +160,7 @@ class DPOTrainer(AcceleratedTrainer):
                 with torch.no_grad():
                     with scoped_seed(self.config.train.seed):
                         sample_imgs = self.deterministic_sample(sample_prompts)
-                        sample_imgs = [wandb.Image(img, caption = prompt) for (img, prompt) in zip(sample_imgs, sample_prompts)]
+                        sample_imgs_wandb = [wandb.Image(img, caption = prompt) for (img, prompt) in zip(sample_imgs, sample_prompts)]
 
                 # Logging
                 if self.use_wandb:
@@ -168,7 +169,7 @@ class DPOTrainer(AcceleratedTrainer):
                         "accuracy" : metrics["accuracy"],
                         "dpo_loss" : metrics["loss"],
                         "time_per_1k" : last_batch_time,
-                        "img_sample" : sample_imgs
+                        "img_sample" : sample_imgs_wandb
                     })
                 # save images
                 if self.accelerator.is_main_process and self.config.train.save_samples:

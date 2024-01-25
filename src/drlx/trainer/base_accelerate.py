@@ -8,6 +8,7 @@ import wandb
 import logging
 import torch
 from diffusers import StableDiffusionPipeline
+import os
 
 
 class AcceleratedTrainer(BaseTrainer):
