@@ -32,6 +32,10 @@ class DPOTrainer(AcceleratedTrainer):
     def __init__(self, config : DRLXConfig):    
         super().__init__(config)
 
+        # DPO requires we use vae encode, so let's put it on all GPUs
+        self.vae = self.accelerator.unwrap_model(self.model).vae
+        self.vae = self.accelerator.prepare(self.vae)
+
         assert isinstance(self.config.method, DPOConfig), "ERROR: Method config must be DPO config"
 
     def setup_model(self):
@@ -57,7 +61,7 @@ class DPOTrainer(AcceleratedTrainer):
         """
         return self.sampler.compute_loss(
             prompts=prompts, chosen_img=chosen_img, rejected_img=rejected_img,
-            denoiser=self.model, ref_denoiser=ref_denoiser, vae=self.model.vae,
+            denoiser=self.model, ref_denoiser=ref_denoiser, vae=self.vae,
             device=self.accelerator.device,
             method_config=self.config.method,
             accelerator=self.accelerator
@@ -69,7 +73,7 @@ class DPOTrainer(AcceleratedTrainer):
         Sample images deterministically. Utility for visualizing changes for fixed prompts through training.
         """
         gen = torch.Generator(device=self.pipe.device).manual_seed(self.config.train.seed)
-        self.pipe.unet = self.model.unet
+        self.pipe.unet = self.accelerator.unwrap_model(self.model).unet
         return self.pipe(prompts, generator = gen).images
 
     def train(self, pipeline):
@@ -137,57 +141,57 @@ class DPOTrainer(AcceleratedTrainer):
             self.accelerator.print(f"Epoch {epoch}/{epochs}.")
 
             for batch in tqdm(dataloader):
-                metrics = self.loss(
-                    prompts = batch['prompts'],
-                    chosen_img = batch['chosen_pixel_values'],
-                    rejected_img = batch['rejected_pixel_values'],
-                    ref_denoiser = ref_model
-                )
+                with self.accelerator.accumulate(self.model):
+                    metrics = self.loss(
+                        prompts = batch['prompts'],
+                        chosen_img = batch['chosen_pixel_values'],
+                        rejected_img = batch['rejected_pixel_values'],
+                        ref_denoiser = ref_model
+                    )
 
-                self.accelerator.wait_for_everyone()
-
-                # Optimizer step
-                self.accelerator.clip_grad_norm_(
-                    filter(lambda p: p.requires_grad, self.model.parameters()),
-                    self.config.train.grad_clip
-                )
-                self.optimizer.step()
-                self.scheduler.step()
-                self.optimizer.zero_grad()
-
-                # Generate the sample prompts
-                self.pipe.unet = self.model.unet
-                with torch.no_grad():
-                    with scoped_seed(self.config.train.seed):
-                        sample_imgs = self.deterministic_sample(sample_prompts)
-                        sample_imgs_wandb = [wandb.Image(img, caption = prompt) for (img, prompt) in zip(sample_imgs, sample_prompts)]
-
-                # Logging
-                if self.use_wandb:
-                    self.accelerator.log({
-                        "base_loss" : metrics["diffusion_loss"],
-                        "accuracy" : metrics["accuracy"],
-                        "dpo_loss" : metrics["loss"],
-                        "time_per_1k" : last_batch_time,
-                        "img_sample" : sample_imgs_wandb
-                    })
-                # save images
-                if self.accelerator.is_main_process and self.config.train.save_samples:
-                    save_images(sample_imgs, f"./samples/{self.config.logging.run_name}/{epoch}")
-
-            
-
-                # Save model every [interval] epochs
-                accum += 1
-                if accum % self.config.train.checkpoint_interval == 0 and self.config.train.checkpoint_interval > 0:
-                    self.accelerator.print("Saving...")
-                    base_path = f"./checkpoints/{self.config.logging.run_name}"
-                    output_path = f"./output/{self.config.logging.run_name}"
                     self.accelerator.wait_for_everyone()
-                    self.save_checkpoint(f"{base_path}/{accum}")
-                    self.save_pretrained(output_path)
 
-                last_epoch_time = time_per_1k(self.config.train.num_samples_per_epoch)
+                    # Optimizer step
+                    self.accelerator.clip_grad_norm_(
+                        filter(lambda p: p.requires_grad, self.model.parameters()),
+                        self.config.train.grad_clip
+                    )
+                    self.optimizer.step()
+                    self.scheduler.step()
+                    self.optimizer.zero_grad()
+
+                    # Generate the sample prompts
+                    with torch.no_grad():
+                        with scoped_seed(self.config.train.seed):
+                            sample_imgs = self.deterministic_sample(sample_prompts)
+                            sample_imgs_wandb = [wandb.Image(img, caption = prompt) for (img, prompt) in zip(sample_imgs, sample_prompts)]
+
+                    # Logging
+                    if self.use_wandb:
+                        self.accelerator.log({
+                            "base_loss" : metrics["diffusion_loss"],
+                            "accuracy" : metrics["accuracy"],
+                            "dpo_loss" : metrics["loss"],
+                            "time_per_1k" : last_batch_time,
+                            "img_sample" : sample_imgs_wandb
+                        })
+                    # save images
+                    if self.accelerator.is_main_process and self.config.train.save_samples:
+                        save_images(sample_imgs, f"./samples/{self.config.logging.run_name}/{epoch}")
+
+                
+
+                    # Save model every [interval] epochs
+                    accum += 1
+                    if accum % self.config.train.checkpoint_interval == 0 and self.config.train.checkpoint_interval > 0:
+                        self.accelerator.print("Saving...")
+                        base_path = f"./checkpoints/{self.config.logging.run_name}"
+                        output_path = f"./output/{self.config.logging.run_name}"
+                        self.accelerator.wait_for_everyone()
+                        self.save_checkpoint(f"{base_path}/{accum}")
+                        self.save_pretrained(output_path)
+
+                    last_epoch_time = time_per_1k(self.config.train.num_samples_per_epoch)
             
                 del metrics
             del dataloader

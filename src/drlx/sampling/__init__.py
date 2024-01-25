@@ -305,6 +305,7 @@ class DPOSampler(Sampler):
 
         scheduler = accelerator.unwrap_model(denoiser).scheduler
         preprocess = accelerator.unwrap_model(denoiser).preprocess
+        encode = accelerator.unwrap_model(vae).encode
 
         beta = method_config.beta
 
@@ -316,8 +317,8 @@ class DPOSampler(Sampler):
                 do_classifier_free_guidance = self.config.guidance_scale > 1.0
             ).detach()
 
-            chosen_latent = vae.encode(chosen_img).latent_dist.sample()
-            rejected_latent = vae.encode(rejected_img).latent_dist.sample()
+            chosen_latent = encode(chosen_img).latent_dist.sample()
+            rejected_latent = encode(rejected_img).latent_dist.sample()
 
         # sample random ts
         timesteps = torch.randint(
