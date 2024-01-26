@@ -99,9 +99,13 @@ class DPOConfig(MethodConfig):
 
     :param beta: Deviation from initial model
     :type beta: float
+    
+    :param ref_mem_strategy: Strategy for managing reference model on memory. By default, puts it in 16 bit.
+    :type ref_mem_strategy: str
     """
     name : str = "DPO"
     beta : float = 0.9
+    ref_mem_strategy : str = None # None or "half"
 
 @dataclass
 class TrainConfig(ConfigClass):

@@ -308,6 +308,7 @@ class DPOSampler(Sampler):
         encode = accelerator.unwrap_model(vae).encode
 
         beta = method_config.beta
+        ref_strategy = method_config.ref_mem_strategy
 
         # Text and image preprocessing
         with torch.no_grad():
@@ -388,7 +389,13 @@ class DPOSampler(Sampler):
 
                 accelerator.unwrap_model(denoiser).enable_adapters()
             else:
-                pass # TODO: Maybe not needed? Do we want non-LoRA DPO?
+                ref_inputs = {
+                    "sample" : noisy_inputs.half() if ref_strategy == "half" else noisy_inputs,
+                    "timestep" : timesteps,
+                    "encoder_hidden_states" : text_embeds.half() if ref_strategy == "half" else text_embeds 
+                }
+                ref_pred = ref_denoiser(**ref_inputs).sample
+                ref_diff, ref_loss = split_mse(ref_pred, target)
         
         # DPO Objective
         surr_loss = (-beta/2) * (model_diff - ref_diff)

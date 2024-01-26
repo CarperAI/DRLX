@@ -18,6 +18,7 @@ import numpy as np
 import wandb
 import accelerate.utils
 from PIL import Image
+from copy import deepcopy
 
 from diffusers import StableDiffusionPipeline
 
@@ -119,8 +120,10 @@ class DPOTrainer(AcceleratedTrainer):
         
         # Ref model
         if not do_lora:
-            ref_model = self.setup_model()
-            ref_model = ref_model.to("cuda:1")
+            ref_model = deepcopy(self.accelerator.unwrap_model(self.model).unet)
+            ref_model.requires_grad = False
+            if self.config.method.ref_mem_strategy == "half": ref_model = ref_model.half()
+            ref_model = self.accelerator.prepare(ref_model)
         else:
             ref_model = None
 
