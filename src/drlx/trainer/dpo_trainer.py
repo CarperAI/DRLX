@@ -172,6 +172,7 @@ class DPOTrainer(AcceleratedTrainer):
                             "base_loss" : metrics["diffusion_loss"],
                             "accuracy" : metrics["accuracy"],
                             "dpo_loss" : metrics["loss"],
+                            "ref_deviation" : metrics["ref_deviation"],
                             "time_per_1k" : last_batch_time,
                             "img_sample" : sample_imgs_wandb
                         })
