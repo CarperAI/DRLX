@@ -384,7 +384,7 @@ class DPOSampler(Sampler):
                     time_step = timesteps,
                     text_embeds = text_embeds
                 )
-                ref_diff, _ = split_mse(ref_pred, target)
+                ref_diff, ref_loss = split_mse(ref_pred, target)
 
                 accelerator.unwrap_model(denoiser).enable_adapters()
             else:
@@ -406,5 +406,6 @@ class DPOSampler(Sampler):
         return {
             "loss" : loss.item(),
             "diffusion_loss" : base_loss.item(),
-            "accuracy" : acc.item()
+            "accuracy" : acc.item(),
+            "ref_deviation" : (ref_loss - base_loss) ** 2
         }
