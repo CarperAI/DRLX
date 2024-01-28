@@ -328,8 +328,6 @@ class DPOSampler(Sampler):
 
         # One step of noising to samples
         noise = torch.randn_like(chosen_latent) # [B, C, H, W]
-        noisy_chosen = scheduler.add_noise(chosen_latent, noise, timesteps)
-        noisy_rejected = scheduler.add_noise(rejected_latent, noise, timesteps)
 
         # Doubling across chosen and rejeceted
         def double_up(x):
@@ -398,7 +396,7 @@ class DPOSampler(Sampler):
                 ref_diff, ref_loss = split_mse(ref_pred, target)
         
         # DPO Objective
-        surr_loss = (-beta/2) * (model_diff - ref_diff)
+        surr_loss = -beta * (model_diff - ref_diff)
         loss = -1 * F.logsigmoid(surr_loss.mean())
 
         # Get approx accuracy as models probability of giving chosen over rejected
