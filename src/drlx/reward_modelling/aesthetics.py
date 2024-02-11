@@ -70,7 +70,7 @@ def aesthetic_model_normalize(a, axis=-1, order=2):
 def aesthetic_scoring(imgs, preprocess, clip_model, aesthetic_model):    
     imgs = torch.stack([preprocess(Image.fromarray(img)).cuda() for img in imgs])
     with torch.no_grad(): image_features = clip_model.encode_image(imgs)
-    im_emb_arr = aesthetic_model_normalize(image_features.cpu().detach().numpy())
+    im_emb_arr = aesthetic_model_normalize(image_features.cpu().detach().float().numpy())
     prediction = aesthetic_model(torch.from_numpy(im_emb_arr).float().cuda())
     return prediction
 

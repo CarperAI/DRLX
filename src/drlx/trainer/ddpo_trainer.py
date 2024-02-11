@@ -261,8 +261,7 @@ class DDPOTrainer(BaseTrainer):
 
         per_prompt_stat_tracker = PerPromptStatTracker(self.config.method.buffer_size, self.config.method.min_count)
 
-        if isinstance(reward_fn, torch.nn.Module):
-            reward_fn = self.accelerator.prepare(reward_fn)
+        reward_fn_is_model = isinstance(reward_fn, torch.nn.Module)
 
         # Set the epoch count
         outer_epochs = self.config.train.num_epochs
@@ -309,6 +308,11 @@ class DDPOTrainer(BaseTrainer):
                 all_prompts.append(prompts)
 
             # Get rewards from experiences
+
+            # Before reward fn is used, prepare it with accelerator if its a model
+            if reward_fn_is_model:
+                reward_fn = self.accelerator.prepare(reward_fn)
+
             self.accelerator.wait_for_everyone()
             unwrapped_model = self.accelerator.unwrap_model(self.model)
             imgs = [unwrapped_model.postprocess(pred) for pred in preds]
@@ -350,6 +354,11 @@ class DDPOTrainer(BaseTrainer):
 
             # Inner epochs and actual training
             self.accelerator.print("Training...")
+
+            # Move the RM off GPUs if it is a model
+            if reward_fn_is_model:
+                reward_fn = self.accelerator.unwrap_model(reward_fn).cpu()
+            
             experience_loader = self.accelerator.prepare(experience_loader)
             # Inner epochs normally one, disable progress bar when this is the case 
             for inner_epoch in tqdm(range(self.config.method.num_inner_epochs),
