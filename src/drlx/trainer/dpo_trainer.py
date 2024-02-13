@@ -20,7 +20,7 @@ import accelerate.utils
 from PIL import Image
 from copy import deepcopy
 
-from diffusers import StableDiffusionPipeline
+from diffusers import DiffusionPipeline
 
 class DPOTrainer(AcceleratedTrainer):
     """ 
@@ -45,7 +45,7 @@ class DPOTrainer(AcceleratedTrainer):
         """
         model = self.get_arch(self.config)(self.config.model, sampler = DPOSampler(self.config.sampler))
         if self.config.model.model_path is not None:
-            model, pipe = model.from_pretrained_pipeline(StableDiffusionPipeline, self.config.model.model_path)
+            model, pipe = model.from_pretrained_pipeline(DiffusionPipeline, self.config.model.model_path)
 
         self.pipe = pipe
         self.pipe.set_progress_bar_config(disable=True)         
@@ -155,10 +155,11 @@ class DPOTrainer(AcceleratedTrainer):
                     self.accelerator.wait_for_everyone()
 
                     # Optimizer step
-                    self.accelerator.clip_grad_norm_(
-                        filter(lambda p: p.requires_grad, self.model.parameters()),
-                        self.config.train.grad_clip
-                    )
+                    if self.config.train.grad_clip > 0:
+                        self.accelerator.clip_grad_norm_(
+                            filter(lambda p: p.requires_grad, self.model.parameters()),
+                            self.config.train.grad_clip
+                        )
                     self.optimizer.step()
                     self.scheduler.step()
                     self.optimizer.zero_grad()

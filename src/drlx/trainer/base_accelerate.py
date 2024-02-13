@@ -125,7 +125,7 @@ class AcceleratedTrainer(BaseTrainer):
                 StableDiffusionPipeline.save_lora_weights(fp, unet_lora_layers=unet_lora_state_dict, safe_serialization = unwrapped_model.config.use_safetensors)
             else:
                 self.pipe.unet = unwrapped_model.unet
-                self.pipe.save_pretrained(fp, safe_serialization = unwrapped_model.config.use_safetensors)
+                self.pipe.save_pretrained(fp, safe_serialization = unwrapped_model.config.pipeline_kwargs['use_safetensors'])
         self.accelerator.wait_for_everyone()
 
     def extract_pipeline(self):
