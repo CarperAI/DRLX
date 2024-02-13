@@ -160,7 +160,7 @@ class TrainConfig(ConfigClass):
     num_epochs: int = 50
     total_samples: int = None
     num_samples_per_epoch: int = 256
-    grad_clip: float = 1.0
+    grad_clip: float = -1
     checkpoint_interval: int = 10
     checkpoint_path: str = "checkpoints"
     seed: int = 0

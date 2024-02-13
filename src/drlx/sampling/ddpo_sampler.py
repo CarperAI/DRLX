@@ -74,16 +74,20 @@ class DDPOSampler(Sampler):
 
         scheduler = denoiser_unwrapped.scheduler
         preprocess = denoiser_unwrapped.preprocess
+        sdxl_flag = denoiser_unwrapped.sdxl_flag
         noise_shape = denoiser_unwrapped.get_input_shape()
 
         text_embeds = preprocess(
             prompts, mode = "embeds", device = device,
             num_images_per_prompt = 1,
             do_classifier_free_guidance = self.config.guidance_scale > 1.0
-        ).detach()
+        )
 
         # If not SDXL, we assume encode prompts gave normal and negative embeds, which we concat
-        text_embeds = torch.cat([text_embeds[1], text_embeds[0]])
+        if sdxl_flag:
+            pass # TODO: SDXL Support for DDPO
+        else:
+            text_embeds = torch.cat([text_embeds[1], text_embeds[0]]).detach()
 
         scheduler.set_timesteps(self.config.num_inference_steps, device = device)
         latents = torch.randn(len(prompts), *noise_shape, device = device)

@@ -71,10 +71,7 @@ class LDMUNet(BaseConditionalDenoiser):
         """
 
         kwargs = self.config.pipeline_kwargs
-        if kwargs['variant'] == "fp16":
-            kwargs['torch_dtype'] = torch.float16
-        else:
-            kwargs["torch_dtype"] = torch.float32
+        kwargs["torch_dtype"] = torch.float32
 
         pipe = cls.from_pretrained(path, **kwargs)
 
@@ -166,7 +163,8 @@ class LDMUNet(BaseConditionalDenoiser):
             time_step : Union[TensorType["batch"], int], # Note diffusers tyically does 999->0 as steps
             input_ids : TensorType["batch", "seq_len"] = None,
             attention_mask : TensorType["batch", "seq_len"] = None,
-            text_embeds : TensorType["batch", "d"] = None
+            text_embeds : TensorType["batch", "d"] = None,
+            added_cond_kwargs = {}
         ) -> TensorType["batch", "channels", "height", "width"]:
         """
         For text conditioned UNET, inputs are assumed to be:
@@ -179,7 +177,8 @@ class LDMUNet(BaseConditionalDenoiser):
         return self.unet(
             pixel_values,
             time_step,
-            encoder_hidden_states = text_embeds
+            encoder_hidden_states = text_embeds,
+            added_cond_kwargs = added_cond_kwargs
         ).sample
     
     @property

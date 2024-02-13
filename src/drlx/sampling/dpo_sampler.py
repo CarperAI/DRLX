@@ -4,6 +4,7 @@ import einops as eo
 
 from drlx.sampling.base import Sampler
 from drlx.configs import DPOConfig
+from drlx.utils.sdxl import get_time_ids
 
 class DPOSampler(Sampler):
     def compute_loss(
@@ -37,11 +38,17 @@ class DPOSampler(Sampler):
                 prompts, mode = "embeds", device = device,
                 num_images_per_prompt = 1,
                 do_classifier_free_guidance = self.config.guidance_scale > 1.0
-            ).detach()
+            )
 
             # The value returned above varies depending on model
             # With most models its two values, positive and negative prompts
             # With DPO we don't care about CFG, so just only get the positive prompts
+            added_cond_kwargs = {}
+            if sdxl_flag:
+                added_cond_kwargs['text_embeds'] = text_embeds[2].detach() # Pooled prompt embeds
+                added_cond_kwargs['time_ids'] = get_time_ids(chosen_img)
+
+            text_embeds = text_embeds[0].detach()
 
             chosen_latent = encode(chosen_img).latent_dist.sample()
             rejected_latent = encode(rejected_img).latent_dist.sample()
@@ -66,6 +73,11 @@ class DPOSampler(Sampler):
         timesteps = double_up(timesteps)
         noise = double_up(noise)
         text_embeds = double_up(text_embeds)
+
+        if sdxl_flag:
+            added_cond_kwargs['text_embeds'] = double_up(added_cond_kwargs['text_embeds'])
+            added_cond_kwargs['time_ids'] = double_up(added_cond_kwargs['time_ids'])
+
         latent = torch.cat([chosen_latent, rejected_latent])
 
         noisy_inputs = scheduler.add_noise(
@@ -94,7 +106,8 @@ class DPOSampler(Sampler):
         pred = denoiser(
             pixel_values = noisy_inputs,
             time_step = timesteps,
-            text_embeds = text_embeds
+            text_embeds = text_embeds,
+            added_cond_kwargs = added_cond_kwargs
         )
         model_diff, base_loss = split_mse(pred, target)
 
@@ -106,7 +119,8 @@ class DPOSampler(Sampler):
                 ref_pred = denoiser(
                     pixel_values = noisy_inputs,
                     time_step = timesteps,
-                    text_embeds = text_embeds
+                    text_embeds = text_embeds,
+                    added_cond_kwargs = added_cond_kwargs
                 )
                 ref_diff, ref_loss = split_mse(ref_pred, target)
 
@@ -115,7 +129,8 @@ class DPOSampler(Sampler):
                 ref_inputs = {
                     "sample" : noisy_inputs.half() if ref_strategy == "half" else noisy_inputs,
                     "timestep" : timesteps,
-                    "encoder_hidden_states" : text_embeds.half() if ref_strategy == "half" else text_embeds 
+                    "encoder_hidden_states" : text_embeds.half() if ref_strategy == "half" else text_embeds,
+                    "added_cond_kwargs" : added_cond_kwargs
                 }
                 ref_pred = ref_denoiser(**ref_inputs).sample
                 ref_diff, ref_loss = split_mse(ref_pred, target)
