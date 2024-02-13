@@ -2,7 +2,7 @@ method:
   name : "DPO"
 
 model:
-  model_path: "runwayml/stable-diffusion-v1-5"
+  model_path: "stabilityai/stable-diffusion-2-1"
   pipeline_kwargs:
     use_safetensors: True
     variant: "fp16"
