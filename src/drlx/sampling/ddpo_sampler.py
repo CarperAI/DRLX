@@ -6,7 +6,7 @@ import torch
 from tqdm import tqdm
 import math
 
-from drlx.sampling import Sampler
+from drlx.sampling.base import Sampler
 from drlx.configs import DDPOConfig
 
 class DDPOSampler(Sampler):
@@ -82,13 +82,16 @@ class DDPOSampler(Sampler):
             do_classifier_free_guidance = self.config.guidance_scale > 1.0
         ).detach()
 
+        # If not SDXL, we assume encode prompts gave normal and negative embeds, which we concat
+        text_embeds = torch.cat([text_embeds[1], text_embeds[0]])
+
         scheduler.set_timesteps(self.config.num_inference_steps, device = device)
         latents = torch.randn(len(prompts), *noise_shape, device = device)
 
         all_step_preds, all_log_probs = [latents], []
 
         for t in tqdm(scheduler.timesteps, disable = not show_progress):
-            latent_input = torch.cat([latents] * 2)  
+            latent_input = torch.cat([latents] * 2)  # Double for CFG
             latent_input = scheduler.scale_model_input(latent_input, t)
 
             pred = denoiser(

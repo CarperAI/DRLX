@@ -2,7 +2,7 @@ import torch
 import torch.nn.functional as F
 import einops as eo
 
-from drlx.sampling import Sampler
+from drlx.sampling.base import Sampler
 from drlx.configs import DPOConfig
 
 class DPOSampler(Sampler):
@@ -25,6 +25,7 @@ class DPOSampler(Sampler):
 
         scheduler = accelerator.unwrap_model(denoiser).scheduler
         preprocess = accelerator.unwrap_model(denoiser).preprocess
+        sdxl_flag = accelerator.unwrap_model(denoiser).sdxl_flag
         encode = accelerator.unwrap_model(vae).encode
 
         beta = method_config.beta
@@ -37,6 +38,10 @@ class DPOSampler(Sampler):
                 num_images_per_prompt = 1,
                 do_classifier_free_guidance = self.config.guidance_scale > 1.0
             ).detach()
+
+            # The value returned above varies depending on model
+            # With most models its two values, positive and negative prompts
+            # With DPO we don't care about CFG, so just only get the positive prompts
 
             chosen_latent = encode(chosen_img).latent_dist.sample()
             rejected_latent = encode(rejected_img).latent_dist.sample()
