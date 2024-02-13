@@ -28,7 +28,10 @@ class LDMUNet(BaseConditionalDenoiser):
         super().__init__(config, sampler_config, sampler)
 
         self.unet : UNet2DConditionModel = None
+
         self.text_encoder = None
+        self.text_encoder_2 = None # SDXL Support, just needs to be here for device mapping
+
         self.vae = None
         self.encode_prompt : Callable = None
 
@@ -36,6 +39,8 @@ class LDMUNet(BaseConditionalDenoiser):
         self.scheduler = None
 
         self.scale_factor = None
+
+        self.sdxl_flag = self.config.sdxl
 
     def get_input_shape(self) -> Tuple[int]:
         """
@@ -65,16 +70,28 @@ class LDMUNet(BaseConditionalDenoiser):
         :rtype: LDMUNet
         """
 
-        pipe = cls.from_pretrained(path, use_safetensors = self.config.use_safetensors, local_files_only = self.config.local_model)
+        kwargs = self.config.pipeline_kwargs
+        if kwargs['variant'] == "fp16":
+            kwargs['torch_dtype'] = torch.float16
+        else:
+            kwargs["torch_dtype"] = torch.float32
+
+        pipe = cls.from_pretrained(path, **kwargs)
 
         if self.config.attention_slicing: pipe.enable_attention_slicing()
         if self.config.xformers_memory_efficient: pipe.enable_xformers_memory_efficient_attention()
 
         self.unet = pipe.unet
         self.text_encoder = pipe.text_encoder
+
+        # SDXL compat
+        if self.sdxl_flag:
+            self.text_encoder_2 = pipe.text_encoder_2
+
         self.vae = pipe.vae
         self.scale_factor = pipe.vae_scale_factor
-        self.encode_prompt = pipe._encode_prompt
+
+        self.encode_prompt = pipe.encode_prompt
 
         self.text_encoder.requires_grad_(False)
         self.vae.requires_grad_(False)

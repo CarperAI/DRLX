@@ -235,14 +235,14 @@ class ModelConfig(ConfigClass):
     :param model_path: Path or name of the model (local or on huggingface hub)
     :type model_path: str
 
-    :param model_arch_type: Type of model architecture. 
+    :param pipeline_kwargs: Keyword arguments for pipeline if model is being loaded from one
+    :type pipeline_kwargs: dict
+
+    :param sdxl: Using SDXL model?
+    :type sdxl: bool
+
+    :param model_arch_type: Type of model architecture. Defaults to LDM UNet
     :type model_arch_type: str
-
-    :param use_safetensors: Use safe tensors when loading pipeline?
-    :type use_safetensors: bool
-
-    :param local_model: Force model to load checkpoint locally only
-    :type local_model: bool
 
     :param attention_slicing: Whether to use attention slicing
     :type attention_slicing: bool
@@ -258,9 +258,9 @@ class ModelConfig(ConfigClass):
     """
 
     model_path: str = None
+    pipeline_kwargs : dict = None
+    sdxl : bool = False
     model_arch_type: str = None
-    use_safetensors : bool = False
-    local_model : bool = False
     attention_slicing: bool = False
     xformers_memory_efficient: bool = False 
     gradient_checkpointing: bool = False
