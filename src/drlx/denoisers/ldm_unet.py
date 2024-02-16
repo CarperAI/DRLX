@@ -28,7 +28,10 @@ class LDMUNet(BaseConditionalDenoiser):
         super().__init__(config, sampler_config, sampler)
 
         self.unet : UNet2DConditionModel = None
+
         self.text_encoder = None
+        self.text_encoder_2 = None # SDXL Support, just needs to be here for device mapping
+
         self.vae = None
         self.encode_prompt : Callable = None
 
@@ -36,6 +39,8 @@ class LDMUNet(BaseConditionalDenoiser):
         self.scheduler = None
 
         self.scale_factor = None
+
+        self.sdxl_flag = self.config.sdxl
 
     def get_input_shape(self) -> Tuple[int]:
         """
@@ -65,16 +70,25 @@ class LDMUNet(BaseConditionalDenoiser):
         :rtype: LDMUNet
         """
 
-        pipe = cls.from_pretrained(path, use_safetensors = self.config.use_safetensors, local_files_only = self.config.local_model)
+        kwargs = self.config.pipeline_kwargs
+        kwargs["torch_dtype"] = torch.float32
+
+        pipe = cls.from_pretrained(path, **kwargs)
 
         if self.config.attention_slicing: pipe.enable_attention_slicing()
         if self.config.xformers_memory_efficient: pipe.enable_xformers_memory_efficient_attention()
 
         self.unet = pipe.unet
         self.text_encoder = pipe.text_encoder
+
+        # SDXL compat
+        if self.sdxl_flag:
+            self.text_encoder_2 = pipe.text_encoder_2
+
         self.vae = pipe.vae
         self.scale_factor = pipe.vae_scale_factor
-        self.encode_prompt = pipe._encode_prompt
+
+        self.encode_prompt = pipe.encode_prompt
 
         self.text_encoder.requires_grad_(False)
         self.vae.requires_grad_(False)
@@ -149,7 +163,8 @@ class LDMUNet(BaseConditionalDenoiser):
             time_step : Union[TensorType["batch"], int], # Note diffusers tyically does 999->0 as steps
             input_ids : TensorType["batch", "seq_len"] = None,
             attention_mask : TensorType["batch", "seq_len"] = None,
-            text_embeds : TensorType["batch", "d"] = None
+            text_embeds : TensorType["batch", "d"] = None,
+            added_cond_kwargs = {}
         ) -> TensorType["batch", "channels", "height", "width"]:
         """
         For text conditioned UNET, inputs are assumed to be:
@@ -162,8 +177,20 @@ class LDMUNet(BaseConditionalDenoiser):
         return self.unet(
             pixel_values,
             time_step,
-            encoder_hidden_states = text_embeds
+            encoder_hidden_states = text_embeds,
+            added_cond_kwargs = added_cond_kwargs
         ).sample
     
+    @property
+    def device(self):
+        return self.unet.device
+
+    def enable_adapters(self):
+        if self.config.lora_rank:
+            self.unet.enable_adapters()
+
+    def disable_adapters(self):
+        if self.config.lora_rank:
+            self.unet.disable_adapters()
 
         

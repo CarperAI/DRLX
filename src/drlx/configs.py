@@ -91,6 +91,22 @@ class DDPOConfig(MethodConfig):
     buffer_size: int = 32 # Set to None to avoid using per prompt stat tracker
     min_count: int = 16
 
+@register_method("DPO")
+@dataclass
+class DPOConfig(MethodConfig):
+    """
+    Config for DPO-related hyperparams
+
+    :param beta: Deviation from initial model
+    :type beta: float
+    
+    :param ref_mem_strategy: Strategy for managing reference model on memory. By default, puts it in 16 bit.
+    :type ref_mem_strategy: str
+    """
+    name : str = "DPO"
+    beta : float = 0.9
+    ref_mem_strategy : str = None # None or "half"
+
 @dataclass
 class TrainConfig(ConfigClass):
     """
@@ -144,7 +160,7 @@ class TrainConfig(ConfigClass):
     num_epochs: int = 50
     total_samples: int = None
     num_samples_per_epoch: int = 256
-    grad_clip: float = 1.0
+    grad_clip: float = -1
     checkpoint_interval: int = 10
     checkpoint_path: str = "checkpoints"
     seed: int = 0
@@ -219,14 +235,14 @@ class ModelConfig(ConfigClass):
     :param model_path: Path or name of the model (local or on huggingface hub)
     :type model_path: str
 
-    :param model_arch_type: Type of model architecture. 
+    :param pipeline_kwargs: Keyword arguments for pipeline if model is being loaded from one
+    :type pipeline_kwargs: dict
+
+    :param sdxl: Using SDXL model?
+    :type sdxl: bool
+
+    :param model_arch_type: Type of model architecture. Defaults to LDM UNet
     :type model_arch_type: str
-
-    :param use_safetensors: Use safe tensors when loading pipeline?
-    :type use_safetensors: bool
-
-    :param local_model: Force model to load checkpoint locally only
-    :type local_model: bool
 
     :param attention_slicing: Whether to use attention slicing
     :type attention_slicing: bool
@@ -242,9 +258,9 @@ class ModelConfig(ConfigClass):
     """
 
     model_path: str = None
+    pipeline_kwargs : dict = None
+    sdxl : bool = False
     model_arch_type: str = None
-    use_safetensors : bool = False
-    local_model : bool = False
     attention_slicing: bool = False
     xformers_memory_efficient: bool = False 
     gradient_checkpointing: bool = False
